@@ -99,6 +99,39 @@ without the warm start it stays below the probe — initialization from the rout
 the trick. First training attempt with BCE-on-soft-probs underfit catastrophically;
 KL distillation is the right loss.)
 
+### 7. Qwen3-30B-A3B (48×128, top-8): locality holds, sparser pools cache BETTER
+
+33,354 decode tokens, same corpus, expert IDs via the llama.cpp tracer
+(`bench/results/qwen3-30b-analysis.json`, `assets/qwen3-30b-*.png`):
+
+- **Temporal locality is architecture-invariant**: 43.5% prev-token reuse (OLMoE:
+  40.4%); 77% within 8 tokens (OLMoE: 80%). The core premise transfers.
+- **Fractional capacity works harder at higher expert counts**: at 12.5% of experts
+  cached, LFU hits 57.6% (OLMoE: 35.4%); at 37.5%, 89.9% (OLMoE: 70.7%). With only
+  8-of-128 firing per layer, the *relative* working set shrinks — and GLM-5.2's
+  8-of-256 should extend the trend. The premise gets easier at target scale.
+- Static popularity is even weaker at 128E (top-25% covers 47%); margins equally
+  thin (98% of top-8 boundaries gap < 0.01). Same conclusions, stronger.
+
+### 8. First end-to-end projection for GLM-5.2 on this box
+
+Replaying the Qwen traces through the paging simulator at GLM-5.2-Q2 geometry
+(12 MiB experts, 17.8% fractional residency = 40 GB cache vs 225 GB of experts,
+13 GB/token compute reads, 55 GB/s RAM, 7.5 GB/s SSD, Δ=6 m=16 prefetch):
+
+| config | tok/s | hit rate | note |
+|---|---|---|---|
+| predictor recall .95 | **1.90** | .91 | SSD-bandwidth-bound (2.8 GB/tok incl. prefetch waste) |
+| predictor recall .80 | 1.71 | .86 | |
+| demand-only (no prefetch) | 1.87 | .60 | stall-bound instead — same wall, worse p99 |
+| SSD throttled to 4 GB/s | ~1.2 | | why the NVMe heatsink matters |
+
+Useful traffic (~1.95 GB/tok) almost exactly balances compute (242 ms/tok): the box
+sits at the bandwidth-balance point, so **~2 tok/s is the honest projection for
+GLM-5.2-Q2 on 64 GB RAM** — at the plan's success threshold. Prefetch overshoot
+(m=16) is the current overhead to attack (adaptive m / dedupe against in-flight);
+doubling RAM moves the projection to ~3.5–4 tok/s (compute-bound).
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
