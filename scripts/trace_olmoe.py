@@ -29,6 +29,7 @@ def main():
     ap.add_argument("--domains", default="all")
     ap.add_argument("--max-new", type=int, default=1024)
     ap.add_argument("--threads", type=int, default=16)
+    ap.add_argument("--limit", type=int, default=0, help="max prompts per domain (0=all)")
     ap.add_argument("--out", default=str(ROOT / "traces/olmoe"))
     args = ap.parse_args()
 
@@ -51,7 +52,9 @@ def main():
     def mk_hook(layer_idx):
         def hook(_mod, inputs, output):
             hid = inputs[0].detach().to(torch.float16).cpu().numpy()
-            log = output.detach().to(torch.float16).cpu().numpy()
+            # transformers 5.x OlmoeTopKRouter returns (router_logits, topk_w, topk_i)
+            log = (output[0] if isinstance(output, tuple) else output)
+            log = log.detach().to(torch.float16).cpu().numpy()
             step_buf[layer_idx] = (log, hid)
         return hook
 
@@ -61,7 +64,8 @@ def main():
     domains = list(prompts) if args.domains == "all" else args.domains.split(",")
 
     for domain in domains:
-        for pid, prompt in enumerate(prompts[domain]):
+        plist = prompts[domain][: args.limit] if args.limit else prompts[domain]
+        for pid, prompt in enumerate(plist):
             outdir = Path(args.out) / domain / f"{pid:02d}"
             if (outdir / "meta.json").exists():
                 print(f"skip {domain}/{pid:02d} (done)")
@@ -70,6 +74,8 @@ def main():
 
             msgs = [{"role": "user", "content": prompt}]
             ids = tok.apply_chat_template(msgs, add_generation_prompt=True, return_tensors="pt")
+            if not torch.is_tensor(ids):
+                ids = ids["input_ids"]
             P = ids.shape[1]
 
             prefill_logits = None
