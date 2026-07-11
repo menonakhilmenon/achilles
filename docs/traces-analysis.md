@@ -113,6 +113,23 @@ KL distillation is the right loss.)
 - Static popularity is even weaker at 128E (top-25% covers 47%); margins equally
   thin (98% of top-8 boundaries gap < 0.01). Same conclusions, stronger.
 
+### 7b. GLM-4.5-Air (45×128, top-8, the target's family): same story + a live paging baseline
+
+Partial run (4 prompts × 512 tokens — stopped early because the hard `MemoryMax=44G`
+cap pushed ~12 GB into zram swap and made the desktop unusable; resume with
+`MemoryHigh` + `ionice`):
+
+- **Locality confirmed on GLM lineage**: 40% prev-token reuse, 69% within 8 tokens,
+  LRU 47% hits at 12.5% fractional capacity — between OLMoE and Qwen, same shape
+  (`bench/results/glm45-air-analysis.json`).
+- **Naive-mmap paging baseline measured**: the 47.4 GB UD-Q2_K_XL under a 44 GB
+  memory envelope decodes at **~2.3–2.7 tok/s** (llama.cpp, tracing overhead
+  included) with PSI-memory ~40%. This is the "existing tricks" floor the managed
+  runtime (Phase 2) must beat on this exact model — and the kernel's LRU already
+  benefits from the locality above, which bounds how much headroom pure caching
+  has left; the win must come from prefetch + O_DIRECT arena discipline (no swap,
+  no reclaim storms).
+
 ### 8. First end-to-end projection for GLM-5.2 on this box
 
 Replaying the Qwen traces through the paging simulator at GLM-5.2-Q2 geometry
