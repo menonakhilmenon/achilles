@@ -1,0 +1,1 @@
+{"threads":16,"array_bytes_per_thread":536870784,"kernels":{"read":{"best_GBps":57.19,"avg_GBps":55.54},"copy":{"best_GBps":41.12,"avg_GBps":40.30},"triad":{"best_GBps":45.87,"avg_GBps":44.99}}}

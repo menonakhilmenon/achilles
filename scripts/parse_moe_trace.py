@@ -48,7 +48,15 @@ def main():
         layers = sorted(topk[0])
         L = len(layers)
 
-        prefill = np.stack([topk[0][l] for l in layers], axis=1)  # (P, L, k)
+        # llama.cpp computes only the last prompt token through the final layer
+        # during prefill; pad missing leading rows with -1 (invalid expert id)
+        P = max(a.shape[0] for a in topk[0].values())
+        def pad(a):
+            if a.shape[0] == P:
+                return a
+            fill = np.full((P - a.shape[0], a.shape[1]), -1, a.dtype)
+            return np.concatenate([fill, a])
+        prefill = np.stack([pad(topk[0][l]) for l in layers], axis=1)  # (P, L, k)
         dec_steps = sorted(s for s in topk if s > 0)
         decode = (np.stack([np.stack([topk[s][l][0] for l in layers]) for s in dec_steps])
                   if dec_steps else np.zeros((0, L, 8), np.int32))

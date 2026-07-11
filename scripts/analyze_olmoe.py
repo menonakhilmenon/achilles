@@ -200,8 +200,14 @@ def analyze_cache(prompts, L, E):
     xs = [c / E for c in caps]
     for i, pol in enumerate(policies):
         ax.plot(xs, results[pol], color=CAT[i], linewidth=2, marker="o", markersize=4)
-        ax.annotate(names[pol], (xs[-1], results[pol][-1]), textcoords="offset points",
-                    xytext=(6, 0), color=CAT[i], fontsize=10, va="center")
+    # direct labels at line ends, nudged apart to avoid collisions
+    ends = sorted(((results[p][-1], i, p) for i, p in enumerate(policies)), reverse=True)
+    y_prev = 2.0
+    for y, i, pol in ends:
+        y_lab = min(y, y_prev - 0.055)
+        ax.annotate(names[pol], (xs[-1], y_lab), textcoords="offset points",
+                    xytext=(8, 0), color=CAT[i], fontsize=10, va="center")
+        y_prev = y_lab
     ax.set_xlabel(f"cache capacity as fraction of experts per layer (E={E})")
     ax.set_ylabel("hit rate")
     ax.set_title("Cache policy hit rates (per-layer caches, per-session reset)")
@@ -215,11 +221,11 @@ def analyze_cache(prompts, L, E):
 def load_gates(L):
     gates = {}
     for f in sorted((ROOT / "models/olmoe-1b-7b-instruct").glob("*.safetensors")):
-        with safe_open(f, framework="np") as sf:
+        with safe_open(f, framework="pt") as sf:
             for key in sf.keys():
                 if ".mlp.gate.weight" in key:
                     l = int(key.split(".")[2])
-                    gates[l] = sf.get_tensor(key).astype(np.float32)  # (E, H)
+                    gates[l] = sf.get_tensor(key).float().numpy()  # (E, H)
     assert len(gates) == L, f"found {len(gates)} gates"
     return gates
 
@@ -280,6 +286,12 @@ def analyze_margins(prompts):
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--only", default="", help="comma list: skew,reuse,cache,margins,gate_ahead")
+    args = ap.parse_args()
+    only = set(args.only.split(",")) if args.only else None
+
     prompts = load_prompts()
     if not prompts:
         print("no traces found")
@@ -288,16 +300,26 @@ def main():
     L, E = prompts[0]["logits"].shape[1:]
     print(f"{len(prompts)} prompts, {T_total} decode tokens, L={L} E={E}")
 
-    out = {"prompts": len(prompts), "decode_tokens": int(T_total), "layers": int(L), "experts": int(E)}
-    print("skew...");        out["skew"] = analyze_skew(prompts, L, E)
-    print("reuse...");       out["reuse"] = analyze_reuse(prompts, L)
-    print("cache...");       out["cache"] = analyze_cache(prompts, L, E)
-    print("margins...");     out["margins"] = analyze_margins(prompts)
-    print("gate-ahead...");  out["gate_ahead"] = analyze_gate_ahead(prompts, L, load_gates(L))
+    res_path = ROOT / "bench/results/olmoe-analysis.json"
+    out = json.loads(res_path.read_text()) if res_path.exists() else {}
+    out.update({"prompts": len(prompts), "decode_tokens": int(T_total),
+                "layers": int(L), "experts": int(E)})
+    sections = {
+        "skew": lambda: analyze_skew(prompts, L, E),
+        "reuse": lambda: analyze_reuse(prompts, L),
+        "cache": lambda: analyze_cache(prompts, L, E),
+        "margins": lambda: analyze_margins(prompts),
+        "gate_ahead": lambda: analyze_gate_ahead(prompts, L, load_gates(L)),
+    }
+    for name, fn in sections.items():
+        if only and name not in only:
+            continue
+        print(f"{name}...")
+        out[name] = fn()
 
-    (ROOT / "bench/results").mkdir(parents=True, exist_ok=True)
-    (ROOT / "bench/results/olmoe-analysis.json").write_text(json.dumps(out, indent=1))
-    print(json.dumps(out, indent=1)[:2000])
+    res_path.parent.mkdir(parents=True, exist_ok=True)
+    res_path.write_text(json.dumps(out, indent=1))
+    print("saved", res_path)
 
 
 if __name__ == "__main__":

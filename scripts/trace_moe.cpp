@@ -48,11 +48,15 @@ static bool cb_trace(struct ggml_tensor * t, bool ask, void * user_data) {
     fwrite(&magic, 4, 1, tc->out);
     fwrite(hdr, 4, 4, tc->out);
 
+    // tensors like ffn_moe_topk are strided views (row stride nb[1] spans the
+    // full parent row) — copy row by row, writing only ne[0] elements per row
     static std::vector<uint8_t> buf;
-    const size_t nbytes = ggml_nbytes(t);
-    buf.resize(nbytes);
-    ggml_backend_tensor_get(t, buf.data(), 0, nbytes);
-    fwrite(buf.data(), 1, nbytes, tc->out);
+    const size_t row_bytes = (size_t) n * ggml_type_size(t->type);
+    buf.resize(row_bytes);
+    for (int j = 0; j < n_tokens; j++) {
+        ggml_backend_tensor_get(t, buf.data(), (size_t) j * t->nb[1], row_bytes);
+        fwrite(buf.data(), 1, row_bytes, tc->out);
+    }
     tc->records++;
     return true;
 }

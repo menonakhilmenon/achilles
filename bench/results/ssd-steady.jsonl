@@ -1,0 +1,17 @@
+# steady-state (post-GC) sweep
+{"mode":"rand","block_mib":1.00,"threads":2,"secs":8.0,"GBps":2.60,"iops":2480,"lat_avg_ms":0.81,"lat_max_ms":1.5}
+{"mode":"rand","block_mib":1.00,"threads":4,"secs":8.0,"GBps":3.50,"iops":3338,"lat_avg_ms":1.20,"lat_max_ms":2.3}
+{"mode":"rand","block_mib":1.00,"threads":8,"secs":8.0,"GBps":4.48,"iops":4274,"lat_avg_ms":1.87,"lat_max_ms":5.9}
+{"mode":"rand","block_mib":4.00,"threads":2,"secs":8.0,"GBps":4.07,"iops":970,"lat_avg_ms":2.06,"lat_max_ms":2.9}
+{"mode":"rand","block_mib":4.00,"threads":4,"secs":8.0,"GBps":5.20,"iops":1240,"lat_avg_ms":3.23,"lat_max_ms":7.3}
+{"mode":"rand","block_mib":4.00,"threads":8,"secs":8.0,"GBps":3.41,"iops":813,"lat_avg_ms":9.84,"lat_max_ms":34.7}
+{"mode":"rand","block_mib":10.00,"threads":2,"secs":8.0,"GBps":2.34,"iops":223,"lat_avg_ms":8.96,"lat_max_ms":16.8}
+{"mode":"rand","block_mib":10.00,"threads":4,"secs":8.0,"GBps":2.47,"iops":235,"lat_avg_ms":17.00,"lat_max_ms":29.2}
+{"mode":"rand","block_mib":10.00,"threads":8,"secs":8.0,"GBps":3.58,"iops":342,"lat_avg_ms":23.39,"lat_max_ms":49.1}
+{"mode":"rand","block_mib":20.00,"threads":2,"secs":8.0,"GBps":3.64,"iops":173,"lat_avg_ms":11.53,"lat_max_ms":19.0}
+{"mode":"rand","block_mib":20.00,"threads":4,"secs":8.0,"GBps":3.70,"iops":176,"lat_avg_ms":22.68,"lat_max_ms":35.4}
+{"mode":"rand","block_mib":20.00,"threads":8,"secs":8.0,"GBps":3.93,"iops":188,"lat_avg_ms":42.61,"lat_max_ms":83.7}
+{"mode":"rand","block_mib":40.00,"threads":2,"secs":8.0,"GBps":3.60,"iops":86,"lat_avg_ms":23.29,"lat_max_ms":31.2}
+{"mode":"rand","block_mib":40.00,"threads":4,"secs":8.0,"GBps":3.75,"iops":89,"lat_avg_ms":44.73,"lat_max_ms":64.4}
+{"mode":"rand","block_mib":40.00,"threads":8,"secs":8.1,"GBps":3.99,"iops":95,"lat_avg_ms":84.00,"lat_max_ms":160.3}
+{"mode":"seq","block_mib":20.00,"threads":4,"secs":8.0,"GBps":3.78,"iops":180,"lat_avg_ms":22.16,"lat_max_ms":33.4}

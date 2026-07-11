@@ -25,7 +25,7 @@ while IFS=$'\t' read -r domain pid prompt; do
     full="<|im_start|>user\n${prompt}<|im_end|>\n<|im_start|>assistant\n"
     TRACE_OUT="$out" systemd-run --user --scope -p MemoryMax=30G --quiet \
       scripts/trace-moe -m "$MODEL" -p "$full" -n "$N_NEW" -t 14 -c 4096 \
-      --no-display-prompt 2>>"$OUT/log.txt" || echo "FAIL $domain-$pid" >> "$OUT/log.txt"
+      2>>"$OUT/log.txt" || echo "FAIL $domain-$pid" >> "$OUT/log.txt"
     echo "done $domain-$pid ($(stat -c%s "$out" 2>/dev/null || echo 0) bytes)"
 done < /tmp/qwen_prompts.tsv
 

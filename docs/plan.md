@@ -38,18 +38,40 @@ at ~10 GB used and runs a desktop). Enforced, not hoped for:
   at the cap.
 - Watch PSI (`/proc/pressure/memory`) during runs; any zram swap activity = budget bug.
 
-### Ceilings on this box (conservative 60 GB/s RAM, 7 GB/s SSD — verify in Phase 0)
+### Phase 0 measured numbers (2026-07-12, bench/results/)
+
+| Quantity | Measured | Notes |
+|---|---|---|
+| RAM read bw | **57 GB/s** best, 55.5 sustained (16T) | copy 41, triad 46 GB/s; STREAM-style, 8 GiB working set |
+| RAM bw while SSD busy | 55.7 GB/s (−3%) | I/O DMA steals almost nothing; earlier 43 GB/s dip was CPU contention (compile), not I/O |
+| NVMe rand read, 20 MiB blocks | **7.5 GB/s burst / ~3.9 GB/s sustained** | thermal throttle after ~30–60 s of saturated reads (controller sensor 77 °C); recovers in ~45 s idle. QD4 suffices; 11 ms avg latency @QD4 |
+| NVMe rand read, 1 MiB blocks | 4.5 GB/s @QD8, 1.9 ms | small blocks lose ~40% — favor ≥4–20 MiB reads (GLM Q4 expert = 20 MB: perfect) |
+| NVMe seq read | same envelope as rand @20 MiB | large-block random ≈ sequential on this drive |
+| NVMe write | 3.35 GB/s over 128 GiB | one-time model writes only |
+| Post-write GC | reads degrade ~20 min after heavy writes | write models, then let the drive settle before benchmarking/paging |
+
+**Design consequences**: (1) decode paging at ≥80% hit rate needs 1–3 GB/s — below the
+throttle envelope, so 7.5 GB/s burst is the operative number for prefetch deadlines,
+while sustained-throttled 4 GB/s bounds prefill streaming and cold-start;
+(2) a heatsink on the NVMe is the cheapest upgrade in the project (~2× sustained);
+(3) expert reads should be ≥4 MiB — batch small experts into extents.
+
+### Ceilings on this box (measured: 55 GB/s RAM; SSD 7.5 burst / 4 sustained)
 
 | Model | Bytes/token | RAM-bw ceiling | Resident in 40 GB cache | Hit rate needed to stay ceiling-bound* |
 |---|---|---|---|---|
-| GLM-4.5-Air Q4 (~60 GB) | ~6.6 GB | ~9 tok/s | ~2/3 of model | ~85% |
-| Qwen3-235B Q4 (~133 GB) | ~12 GB | ~5 tok/s | ~30% | ~80% |
-| GLM-4.6 Q3 (~150–170 GB) | ~13 GB | ~4.5 tok/s | ~27% | ~80% |
-| GLM-5.2 Q2 (~245 GB) | ~13 GB | ~4.5 tok/s | ~16% | ~80% |
+| GLM-4.5-Air Q4 (~60 GB) | ~6.6 GB | ~8.3 tok/s | ~2/3 of model | ~86% (74%) |
+| Qwen3-235B Q4 (~133 GB) | ~12 GB | ~4.6 tok/s | ~30% | ~85% (72%) |
+| GLM-4.6 Q3 (~150–170 GB) | ~13 GB | ~4.2 tok/s | ~27% | ~85% (72%) |
+| GLM-5.2 Q2 (~245 GB) | ~13 GB | ~4.2 tok/s | ~16% | ~85% (72%) |
 
-\* hit rate at which per-token SSD traffic ÷ 7 GB/s ≤ per-token RAM read time, i.e. the
-SSD fully hides behind compute. The gap between "resident %" and "needed hit rate" is
-exactly what skew + temporal locality + the predictor must supply (research.md §4).
+\* hit rate at which per-token SSD traffic ÷ SSD bandwidth ≤ per-token RAM read time,
+i.e. the SSD fully hides behind compute — first number at 4 GB/s sustained-throttled,
+parenthesized at 7.5 GB/s burst (short generations / heatsinked drive). The gap between
+"resident %" and "needed hit rate" is what skew + temporal locality + the predictor
+must supply — and the OLMoE traces (docs/traces-analysis.md) show exactly that gap
+being closed: 80% of experts recur within an 8-token window, and untrained gate-ahead
+prediction recalls 85–96% at practical lookaheads.
 
 ## Phase 0 — Hardware truth & harness (days)
 

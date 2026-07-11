@@ -1,0 +1,35 @@
+# random reads: block size x threads
+{"mode":"rand","block_mib":1.00,"threads":1,"secs":8.0,"GBps":1.58,"iops":1511,"lat_avg_ms":0.66,"lat_max_ms":1.2}
+{"mode":"rand","block_mib":1.00,"threads":2,"secs":8.0,"GBps":2.49,"iops":2371,"lat_avg_ms":0.84,"lat_max_ms":1.9}
+{"mode":"rand","block_mib":1.00,"threads":4,"secs":8.0,"GBps":3.60,"iops":3431,"lat_avg_ms":1.17,"lat_max_ms":4.9}
+{"mode":"rand","block_mib":1.00,"threads":8,"secs":8.0,"GBps":4.44,"iops":4239,"lat_avg_ms":1.89,"lat_max_ms":3.3}
+{"mode":"rand","block_mib":1.00,"threads":16,"secs":8.0,"GBps":5.47,"iops":5213,"lat_avg_ms":3.07,"lat_max_ms":7.7}
+{"mode":"rand","block_mib":4.00,"threads":1,"secs":8.0,"GBps":2.98,"iops":711,"lat_avg_ms":1.41,"lat_max_ms":2.2}
+{"mode":"rand","block_mib":4.00,"threads":2,"secs":8.0,"GBps":4.02,"iops":959,"lat_avg_ms":2.08,"lat_max_ms":2.9}
+{"mode":"rand","block_mib":4.00,"threads":4,"secs":8.0,"GBps":2.04,"iops":486,"lat_avg_ms":8.23,"lat_max_ms":22.6}
+{"mode":"rand","block_mib":4.00,"threads":8,"secs":8.0,"GBps":1.38,"iops":330,"lat_avg_ms":24.27,"lat_max_ms":47.7}
+{"mode":"rand","block_mib":4.00,"threads":16,"secs":8.0,"GBps":3.73,"iops":889,"lat_avg_ms":17.98,"lat_max_ms":54.8}
+{"mode":"rand","block_mib":10.00,"threads":1,"secs":8.0,"GBps":2.54,"iops":242,"lat_avg_ms":4.13,"lat_max_ms":5.7}
+{"mode":"rand","block_mib":10.00,"threads":2,"secs":8.0,"GBps":3.38,"iops":323,"lat_avg_ms":6.20,"lat_max_ms":12.3}
+{"mode":"rand","block_mib":10.00,"threads":4,"secs":8.0,"GBps":3.57,"iops":340,"lat_avg_ms":11.75,"lat_max_ms":20.7}
+{"mode":"rand","block_mib":10.00,"threads":8,"secs":8.0,"GBps":3.82,"iops":364,"lat_avg_ms":21.96,"lat_max_ms":39.0}
+{"mode":"rand","block_mib":10.00,"threads":16,"secs":8.0,"GBps":4.03,"iops":384,"lat_avg_ms":41.56,"lat_max_ms":116.4}
+{"mode":"rand","block_mib":20.00,"threads":1,"secs":8.0,"GBps":3.24,"iops":155,"lat_avg_ms":6.47,"lat_max_ms":13.8}
+{"mode":"rand","block_mib":20.00,"threads":2,"secs":8.0,"GBps":3.67,"iops":175,"lat_avg_ms":11.44,"lat_max_ms":18.5}
+{"mode":"rand","block_mib":20.00,"threads":4,"secs":8.0,"GBps":3.74,"iops":178,"lat_avg_ms":22.44,"lat_max_ms":38.0}
+{"mode":"rand","block_mib":20.00,"threads":8,"secs":8.0,"GBps":3.92,"iops":187,"lat_avg_ms":42.80,"lat_max_ms":89.6}
+{"mode":"rand","block_mib":20.00,"threads":16,"secs":8.0,"GBps":4.11,"iops":196,"lat_avg_ms":81.44,"lat_max_ms":172.9}
+{"mode":"rand","block_mib":40.00,"threads":1,"secs":8.0,"GBps":3.15,"iops":75,"lat_avg_ms":13.31,"lat_max_ms":26.5}
+{"mode":"rand","block_mib":40.00,"threads":2,"secs":8.0,"GBps":3.64,"iops":87,"lat_avg_ms":23.02,"lat_max_ms":45.3}
+{"mode":"rand","block_mib":40.00,"threads":4,"secs":8.0,"GBps":3.78,"iops":90,"lat_avg_ms":44.37,"lat_max_ms":67.4}
+{"mode":"rand","block_mib":40.00,"threads":8,"secs":8.0,"GBps":4.28,"iops":102,"lat_avg_ms":78.32,"lat_max_ms":167.6}
+{"mode":"rand","block_mib":40.00,"threads":16,"secs":8.1,"GBps":5.09,"iops":121,"lat_avg_ms":131.19,"lat_max_ms":247.6}
+# sequential reads
+{"mode":"seq","block_mib":4.00,"threads":1,"secs":8.0,"GBps":2.04,"iops":487,"lat_avg_ms":2.05,"lat_max_ms":3.2}
+{"mode":"seq","block_mib":4.00,"threads":4,"secs":8.0,"GBps":3.84,"iops":915,"lat_avg_ms":4.37,"lat_max_ms":6.7}
+{"mode":"seq","block_mib":4.00,"threads":8,"secs":8.0,"GBps":4.35,"iops":1038,"lat_avg_ms":7.70,"lat_max_ms":13.4}
+{"mode":"seq","block_mib":20.00,"threads":1,"secs":8.0,"GBps":3.91,"iops":186,"lat_avg_ms":5.37,"lat_max_ms":8.8}
+{"mode":"seq","block_mib":20.00,"threads":4,"secs":8.0,"GBps":4.59,"iops":219,"lat_avg_ms":18.27,"lat_max_ms":27.0}
+{"mode":"seq","block_mib":20.00,"threads":8,"secs":8.0,"GBps":4.85,"iops":231,"lat_avg_ms":34.61,"lat_max_ms":60.7}
+# interference: 20MiB rand t8 SSD while membw(8t) runs
+{"interference":{"ssd":{"mode":"rand","block_mib":20.00,"threads":8,"secs":25.0,"GBps":4.82,"iops":230,"lat_avg_ms":34.77,"lat_max_ms":99.4},"membw":{"threads":8,"array_bytes_per_thread":805306368,"kernels":{"read":{"best_GBps":55.66,"avg_GBps":55.34},"copy":{"best_GBps":38.66,"avg_GBps":37.19},"triad":{"best_GBps":43.82,"avg_GBps":42.21}}}}}
