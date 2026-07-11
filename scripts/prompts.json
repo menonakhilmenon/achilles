@@ -1,0 +1,74 @@
+{
+  "code": [
+    "Write a Python function that parses an Apache access log and returns the top 10 IPs by request count, with a small test.",
+    "Implement an LRU cache in Python with O(1) get and put, then explain the data-structure choice.",
+    "Write a C program that measures random-read throughput of a file using pread and O_DIRECT.",
+    "Debug this code and explain the bug: `def avg(xs): return sum(xs)/len(xs) if xs else 0` when xs is a generator.",
+    "Write a SQL query (and schema) to find users who placed orders in three consecutive months.",
+    "Implement Dijkstra's algorithm in Rust with a binary heap, including comments.",
+    "Write a bash script that watches a directory and rsyncs new files to a remote host, with locking.",
+    "Explain the difference between asyncio tasks and threads in Python, with a code example of each.",
+    "Write a JavaScript function that deep-merges two objects, handling arrays and null correctly.",
+    "Refactor this into idiomatic Python: a triple-nested loop that builds a dict of dicts of lists counting word bigrams per document."
+  ],
+  "math": [
+    "A train leaves city A at 60 km/h and another leaves city B, 300 km away, at 40 km/h toward A. When and where do they meet? Show all steps.",
+    "Prove that the square root of 2 is irrational.",
+    "Compute the integral of x^2 * e^x dx step by step.",
+    "A bag has 5 red, 3 blue, 4 green balls. What is the probability of drawing 2 of the same color in two draws without replacement?",
+    "Solve the recurrence T(n) = 2T(n/2) + n log n and explain which case of the master theorem applies (if any).",
+    "Find all real solutions of x^4 - 5x^2 + 4 = 0 and sketch the reasoning.",
+    "Explain and compute: how many ways can 8 rooks be placed on a chessboard so none attack each other?",
+    "A ladder 10 m long leans against a wall. The base slides away at 1 m/s. How fast is the top falling when the base is 6 m out? Show the calculus.",
+    "What is the expected number of coin flips to get three heads in a row? Derive it.",
+    "Show that the sum of the first n odd numbers is n^2, both algebraically and with a visual argument."
+  ],
+  "chat": [
+    "I have two job offers: a stable big-company role and a risky startup with equity. How should I think about choosing?",
+    "My flatmate never does the dishes and I'm getting resentful. How do I bring it up without a fight?",
+    "Recommend a two-week itinerary for Japan in autumn for someone who loves food and hiking but hates crowds.",
+    "I want to get into running but I've failed to keep the habit twice. What should I do differently this time?",
+    "Explain to me like I'm new to cooking: how do I make a proper tomato pasta sauce from scratch?",
+    "I keep procrastinating on my thesis. Give me a realistic plan for the next two weeks.",
+    "What should I look for when buying a used car from a private seller?",
+    "My 7-year-old asked why the sky is blue. Give me an answer she'd understand and enjoy.",
+    "Help me draft a polite but firm email declining extra unpaid work my manager keeps assigning.",
+    "I'm hosting a dinner for six with one vegan and one gluten-free guest. Propose a menu that works for everyone."
+  ],
+  "essay": [
+    "Write a 600-word essay on how container shipping reshaped the global economy.",
+    "Explain the history and significance of the Rosetta Stone as if writing a museum pamphlet.",
+    "Write an opinion piece: should cities ban cars from their centers? Take a clear position.",
+    "Describe the causes and consequences of the 2008 financial crisis for a general audience.",
+    "Write a 500-word piece on why sleep matters, grounded in what research actually shows.",
+    "Explain how vaccines work and address two common misconceptions, in accessible language.",
+    "Write a profile of the James Webb Space Telescope: what it is, how it works, what it has found.",
+    "Discuss the trade-offs of remote work for early-career employees, with concrete examples.",
+    "Write a short history of the QWERTY keyboard layout and whether the 'slowing typists down' story is true.",
+    "Explain plate tectonics and how we know the plates move, for a curious teenager."
+  ],
+  "reasoning": [
+    "Three people check into a hotel room that costs $30... explain the classic missing dollar riddle and where the reasoning goes wrong.",
+    "You have 12 balls, one is heavier or lighter. Find it in 3 weighings of a balance scale. Walk through the full strategy.",
+    "Alice is looking at Bob, Bob is looking at Carol. Alice is married, Carol is not. Is a married person looking at an unmarried person? Explain carefully.",
+    "A farmer must cross a river with a wolf, a goat, and a cabbage. Explain the solution and why each step is forced.",
+    "If all Bloops are Razzies and some Razzies are Lazzies, can we conclude some Bloops are Lazzies? Explain with a counterexample or proof.",
+    "You flip two coins. At least one is heads. What is the probability both are heads? Explain the common wrong answer too.",
+    "Explain step by step: why does a mirror flip left-right but not up-down?",
+    "Five pirates divide 100 gold coins by seniority voting rules. What does the most senior pirate propose and why?",
+    "A snail climbs 3 m each day and slips 2 m each night. The well is 10 m deep. When does it escape? Careful with the last day.",
+    "Two trains 100 km apart approach at 50 km/h each. A fly at 75 km/h bounces between them. How far does the fly travel? Give the elegant solution."
+  ],
+  "structured": [
+    "Extract into JSON with fields {name, founded, hq, ceo}: 'Acme Robotics, founded in 2011 and headquartered in Turin, is led by CEO Dana Reyes.' Then add two more fictional companies in the same format.",
+    "Produce a YAML CI pipeline for a Python project: lint, test on 3 Python versions, build wheel, publish on tag.",
+    "Create a markdown comparison table of SQLite, PostgreSQL, and DuckDB across 6 dimensions, then a one-paragraph recommendation.",
+    "Convert this recipe to a structured shopping list grouped by supermarket aisle: pancakes for 4 (flour, eggs, milk, butter, baking powder, maple syrup, blueberries).",
+    "Write a JSON schema for a 'library book' object with sensible required fields and types, then two valid example instances.",
+    "Summarize the water cycle as a numbered process list with exactly 6 steps, each one sentence.",
+    "Design a REST API for a todo app: list endpoints as a table (method, path, body, response), then example JSON for each response.",
+    "Generate a CSV (header + 8 rows) of fictional employees with name, department, salary, start_date; make the data internally consistent.",
+    "Turn this into a decision tree in indented text form: choosing between bus, bike, or car for a commute based on distance, weather, and parking.",
+    "Write a git commit message and changelog entry (keep-a-changelog format) for a change that adds rate limiting to a login endpoint."
+  ]
+}

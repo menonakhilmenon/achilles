@@ -1,0 +1,9 @@
+.venv/
+models/
+traces/
+llama.cpp/
+bench/membw
+bench/ssdread
+bench/scratch.bin
+__pycache__/
+*.pyc

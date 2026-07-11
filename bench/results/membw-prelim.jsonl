@@ -1,0 +1,2 @@
+// preliminary: downloads running concurrently; clean rerun below appended later
+{"threads":16,"array_bytes_per_thread":536870784,"kernels":{"read":{"best_GBps":43.38,"avg_GBps":41.14},"copy":{"best_GBps":38.11,"avg_GBps":35.74},"triad":{"best_GBps":42.58,"avg_GBps":39.95}}}
