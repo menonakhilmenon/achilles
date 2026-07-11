@@ -77,12 +77,35 @@ The probability gap between the 8th and 9th expert is < 0.01 in **95.5%** of
   (HOBBIT/ ReMoE-style fallbacks look viable — to be verified in Phase 2 with
   perplexity measurements).
 
+### 6. Trained predictors beat gate-ahead — and the gap grows with lookahead
+
+![predictor](assets/olmoe-predictor.png)
+
+Per-layer predictors trained on the traces (KL-distilled from the true router
+distribution; 80/20 prompt-level split; `scripts/train_predictor.py`):
+
+| recall@16 of actual top-8 | Δ=1 | Δ=4 | Δ=8 |
+|---|---|---|---|
+| gate-ahead (no training) | .965 | .855 | .704 |
+| **linear probe (warm-started, 2048→64)** | **.981** | **.940** | **.901** |
+| MLP 2048→512→64 (cold start) | .908 | .888 | .876 |
+
+The linear probe — literally the same shape as the router, warm-started from the
+gate-ahead solution — dominates at every horizon, and its advantage *widens* with Δ
+(+20 pp at Δ=8). Long-horizon prediction is learnable, which is precisely what the
+SSD tier needs: at Δ=8 with 2× overprovision, 90% of the experts a layer will need
+can be in flight 8 layers early. (The cold-start MLP shows the failure mode too:
+without the warm start it stays below the probe — initialization from the router is
+the trick. First training attempt with BCE-on-soft-probs underfit catastrophically;
+KL distillation is the right loss.)
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
    only decides SSD layout and cold-start placement.
-2. Prefetch = gate-ahead at Δ=1–2 with m≈16 for the near tier; learned predictor
-   (Phase 3) targets Δ≥4 / cross-token horizons for the SSD tier.
+2. Prefetch = warm-started linear probes: Δ=1–2/m=16 for the near tier, Δ=8/m=16–32
+   for the SSD tier (90%+ recall measured); probes cost one extra router-sized matmul
+   per layer — negligible. Cross-token horizons remain to be studied (Phase 3).
 3. Misses concentrate in low-margin routing events → substitution fallback is
    promising; measure its quality cost early.
 4. OLMoE caveat: 64 experts/layer is 4× denser than GLM-5.2's 256; per-layer sparsity

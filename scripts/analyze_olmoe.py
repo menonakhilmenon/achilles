@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TRACES = ROOT / "traces/olmoe"
 ASSETS = ROOT / "docs/assets"
 K = 8  # experts per token
+PREFIX = "olmoe"  # chart filename prefix (importers may override)
 
 # ---- chart chrome (reference palette, light mode) ---------------------------
 INK, MUTED, GRID, BASE = "#0b0b0b", "#898781", "#e1e0d9", "#c3c2b7"
@@ -89,7 +90,7 @@ def analyze_skew(prompts, L, E):
     ax.set_ylabel("cumulative share of activations")
     ax.set_title("Expert popularity is long-tailed (median layer, IQR band)")
     ax.set_ylim(0, 1.02)
-    savefig(fig, "olmoe-skew.png")
+    savefig(fig, f"{PREFIX}-skew.png")
     return {f"top{n}_coverage_median": float(np.median(cum[:, n - 1])) for n in (8, 16, 32)}
 
 
@@ -131,7 +132,7 @@ def analyze_reuse(prompts, L):
     ax.set_ylabel("share of current token's experts already used")
     ax.set_title("Temporal locality: expert reuse vs. lookback window")
     ax.set_ylim(0, 1.02)
-    savefig(fig, "olmoe-reuse.png")
+    savefig(fig, f"{PREFIX}-reuse.png")
     return {f"reuse_w{w}_median": float(np.median(reuse[w])) for w in windows}
 
 
@@ -180,7 +181,7 @@ def sim_cache(seq, capacity, policy, static_order=None):
 
 
 def analyze_cache(prompts, L, E):
-    caps = [8, 12, 16, 24, 32, 48]
+    caps = [max(int(E * f), K) for f in (0.125, 0.1875, 0.25, 0.375, 0.5, 0.75)]
     counts = np.zeros((L, E))
     for p in prompts:
         for l in range(L):
@@ -213,7 +214,7 @@ def analyze_cache(prompts, L, E):
     ax.set_title("Cache policy hit rates (per-layer caches, per-session reset)")
     ax.set_xlim(right=max(xs) * 1.35)
     ax.set_ylim(0, 1.02)
-    savefig(fig, "olmoe-cache.png")
+    savefig(fig, f"{PREFIX}-cache.png")
     return {"capacities_frac": xs, **{f"hit_{p}": results[p] for p in policies}}
 
 
@@ -258,7 +259,7 @@ def analyze_gate_ahead(prompts, L, gates):
     ax.set_title("Gate-ahead predictability vs. lookahead (no training)")
     ax.set_xlim(right=deltas[-1] * 1.28)
     ax.set_ylim(0, 1.02)
-    savefig(fig, "olmoe-gate-ahead.png")
+    savefig(fig, f"{PREFIX}-gate-ahead.png")
     return {f"recall_m{m}": {str(d): float(np.mean(recall[m][d])) for d in deltas} for m in ms}
 
 
@@ -277,7 +278,7 @@ def analyze_margins(prompts):
     ax.set_xlabel("router probability gap between 8th and 9th expert")
     ax.set_ylabel("count (token × layer)")
     ax.set_title("Routing margins: how contested is the last expert slot?")
-    savefig(fig, "olmoe-margins.png")
+    savefig(fig, f"{PREFIX}-margins.png")
     return {
         "frac_gap_below_0.001": float((gaps < 1e-3).mean()),
         "frac_gap_below_0.01": float((gaps < 1e-2).mean()),
