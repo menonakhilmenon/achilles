@@ -436,11 +436,15 @@ static bool cb_arena(struct ggml_tensor * t, bool ask, void *) {
     // selection-probability tensor: safe to bias (mixture weights read the
     // UNbiased probs tensor; only expert CHOICE is nudged toward residents)
     const bool is_sel = strncmp(t->name, "ffn_moe_probs_biased-", 21) == 0;
+    // the graph may hand norms over reshaped 3D ([n_embd, 1, n_tokens]) — a
+    // single token means ONE ROW total, not ne[1]==1; and the last layer's
+    // output-row slice can be ZERO rows on non-final prefill ubatches
     if (ask) {
-        return g_on && (is_topk || (is_norm && t->ne[1] == 1) ||
+        return g_on && (is_topk || (is_norm && ggml_nrows(t) == 1) ||
                         (is_sel && g_ar.bias_strength > 0.f));
     }
     if (!g_on) return true;
+    if (ggml_nelements(t) == 0) return true;
     if (is_sel && g_ar.bias_strength > 0.f && t->type == GGML_TYPE_F32) {
         const int l = atoi(t->name + 21);
         if (l >= 0 && l < g_ar.n_layer && g_ar.pageable[l]) {
@@ -462,6 +466,11 @@ static bool cb_arena(struct ggml_tensor * t, bool ask, void *) {
     if (is_topk) {
         const int l = atoi(t->name + 13);
         const int k = (int) t->ne[0], n_tokens = (int) t->ne[1];
+        if (getenv("ACHILLES_DBG_CB")) {
+            fprintf(stderr, "CB %s ne=[%lld,%lld,%lld,%lld] nb=[%zu,%zu,%zu,%zu] nbytes=%zu type=%d\n",
+                    t->name, (long long)t->ne[0], (long long)t->ne[1], (long long)t->ne[2], (long long)t->ne[3],
+                    t->nb[0], t->nb[1], t->nb[2], t->nb[3], ggml_nbytes(t), (int)t->type);
+        }
         static std::vector<int32_t> ids;
         ids.resize((size_t) k * n_tokens);
         for (int j = 0; j < n_tokens; j++) {
@@ -475,8 +484,13 @@ static bool cb_arena(struct ggml_tensor * t, bool ask, void *) {
             fwrite(ids.data(), 4, k, g_dump);
         }
         g_ar.on_topk(l, ids.data(), k, n_tokens);
-    } else if (is_norm && t->ne[1] == 1 && t->type == GGML_TYPE_F32) {
+    } else if (is_norm && ggml_nrows(t) == 1 && t->type == GGML_TYPE_F32) {
         const int l = atoi(strchr(t->name, '-') + 1);
+        if (getenv("ACHILLES_DBG_CB")) {
+            fprintf(stderr, "CB %s ne=[%lld,%lld,%lld,%lld] nb=[%zu,%zu,%zu,%zu] nbytes=%zu type=%d\n",
+                    t->name, (long long)t->ne[0], (long long)t->ne[1], (long long)t->ne[2], (long long)t->ne[3],
+                    t->nb[0], t->nb[1], t->nb[2], t->nb[3], ggml_nbytes(t), (int)t->type);
+        }
         static std::vector<float> h;
         h.resize(t->ne[0]);
         ggml_backend_tensor_get(t, h.data(), 0, t->ne[0] * sizeof(float));
