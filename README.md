@@ -9,10 +9,12 @@ serves the misses — with a predictor steering both prefetch and eviction.
 
 | GLM-5.2 UD-Q2_K_XL | naive (kernel mmap) | **achilles-arena, full profile** |
 |---|---|---|
-| decode | 0.30 tok/s | **0.83–0.94 tok/s** |
+| decode | 0.30 tok/s | **0.83 tok/s** (cold, controlled, ±0.005 reproducible) |
 | prefill (~2700-token prompt) | ~0.5 tok/s | **8.7 tok/s** (layer-streaming, +27% over demand paging) |
 
-Polite profile (desktop stays usable): ~0.4–0.5 tok/s decode.
+Polite profile (desktop stays usable): ~0.4–0.5 tok/s decode. Earlier 0.94
+readings were warm-cache flattered — see traces-analysis §21 for the honest
+accounting and the byte-budget lesson behind the current defaults.
 
 GLM-4.5-Air (110B) runs at 3.4 tok/s memory-constrained / 15.3 unconstrained.
 Output is token-identical to unpaged inference — the arena is bit-exact.

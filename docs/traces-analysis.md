@@ -507,6 +507,40 @@ future-knowledge gap is attacked ~10× harder by speculation×plan lookahead
 (verified multi-token routing, 17 pp Belady headroom). Revisit if long-prompt
 workloads (where the prefill histogram is high-quality) become the norm.
 
+### 21. The decode "regression" that wasn't: over-fetch + a warm-cache headline
+
+Controlled re-measurement (2026-07-13 overnight) found GLM-5.2 decode at
+0.62–0.64 tok/s where §17 recorded 0.83–0.94. Bisect eliminated, in order:
+SSD health (6.5 GB/s raw O_DIRECT), code (yesterday's binary rebuilt: 0.616),
+GPU placement (-ngl 40/55/99 all 0.55–0.64; the 3.9 GB GTT spill is NOT the
+tax), CPU power profile (performance == balanced within noise).
+
+New decode-detail instrumentation (stall / io bytes / per-stream bw) found it:
+**stall-bound (53 s of 75 s) while moving 309 GB per 48 tokens — 4× true
+demand — with the SSD already saturated (6×1.0 GB/s streams)**. Every wasted
+prefetch byte delays a demand miss the compute thread is blocked on. The
+--fetch sweep (cold, ±0.005 reproducibility):
+
+| --fetch | decode tok/s | decode IO |
+|---|---|---|
+| 1 | 0.799 | 163 GB |
+| **2 (new default)** | **0.803** | 168 GB |
+| 5 | 0.767 | 199 GB |
+| 10 (old default) | 0.643 | 309 GB |
+
+With `--policy reuse` + pstream on top: **0.826 tok/s cold** — the new honest
+headline config. The §17 0.83–0.94 numbers came from a back-to-back triple
+with no page-cache eviction between runs and a tell-tale rising pattern
+(0.83→0.90→0.945): warm-state flattered, not fraudulent, but not the cold
+number either. README updated per owner's honest-numbers directive.
+
+Also fixed: pstream trigger n_tokens≥16 → ≥64 (a 23-token prompt was
+full-layer-streaming 2.9 GB/layer and halving short prefill: 0.54 → 1.25).
+
+Meta-lesson for every future benchmark here: **on a saturated SSD, tok/s is
+set by total bytes moved, not hit rate** — hit .796 at fetch 10 lost to hit
+.581 at fetch 1 by 25%. Optimize bytes, then overlap, then hits.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity

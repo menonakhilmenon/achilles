@@ -1,0 +1,21 @@
+--- nospill (-ngl 55) ---
+0.00.022.803 I arena: 7 shard(s)
+0.00.313.106 I arena: 76 MoE layers x 256 experts, 221.8 GiB of experts total
+0.41.749.425 E arena: layer 78 proj 0 not mappable, stays kernel-paged
+0.41.749.428 E arena: layer 78 proj 1 not mappable, stays kernel-paged
+0.41.749.428 E arena: layer 78 proj 2 not mappable, stays kernel-paged
+0.41.749.433 I arena: replaced 218.6 GiB with anonymous expert memory, budget 30.0 GiB
+ACHILLES prefill: 23 tok in 19.5s = 1.18 tok/s
+ACHILLES decode:  48 tok in 81.2s = 0.591 tok/s
+ACHILLES arena: prefetch=19918 demand=11490 evict=28775 hit=23028 miss=11821 (hit rate 0.661)
+--- oldbin (-ngl 99) ---
+0.00.024.056 I arena: 7 shard(s)
+0.00.249.234 I arena: 76 MoE layers x 256 experts, 221.8 GiB of experts total
+0.44.065.372 E arena: layer 78 proj 0 not mappable, stays kernel-paged
+0.44.065.374 E arena: layer 78 proj 1 not mappable, stays kernel-paged
+0.44.065.374 E arena: layer 78 proj 2 not mappable, stays kernel-paged
+0.44.065.380 I arena: replaced 218.6 GiB with anonymous expert memory, budget 30.0 GiB
+ACHILLES prefill: 23 tok in 18.5s = 1.25 tok/s
+ACHILLES decode:  48 tok in 78.0s = 0.616 tok/s
+ACHILLES arena: prefetch=20407 demand=11037 evict=28815 hit=23953 miss=18471 (hit rate 0.565)
+DONE

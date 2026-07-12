@@ -93,7 +93,7 @@ struct arena {
     std::condition_variable jcv;
     std::vector<std::pair<int,int>> pending_drops;
     size_t pending_drop_bytes = 0;  // evicted-but-not-yet-madvised (real RSS!)
-    int delta = 3, fetch = 10, pstream = 1;
+    int delta = 3, fetch = 2, pstream = 1;   // fetch>2 over-fetches: saturated-SSD sweep 2026-07-13
     float decay = 0.98f;
     bool lru = true;                    // Belady analysis: LRU 61% vs LFU 50% on GLM-5.2
     bool reuse = false;                 // gap/pop reuse-distance policy (sim: +2pp over LRU)
@@ -109,10 +109,17 @@ struct arena {
     std::vector<uint32_t> plan_hint;        // pass id when expert was last planned
 
     std::atomic<uint64_t> n_prefetch{0}, n_evict{0}, n_hit{0}, n_miss{0}, n_demand{0}, n_uring{0}, n_fallback{0};
+    std::atomic<uint64_t> stall_ns{0}, io_bytes{0}, io_ns{0};  // time attribution
+    uint64_t snap[10] = {0};
+    void snapshot() {
+        snap[0] = stall_ns; snap[1] = io_bytes; snap[2] = io_ns;
+        snap[3] = n_hit; snap[4] = n_miss; snap[5] = n_demand; snap[6] = n_prefetch;
+    }
 
     int idx(int l, int e) const { return l * n_expert + e; }
 
     void load_buffered(const load_range &r) {
+        const auto t0 = std::chrono::steady_clock::now();
         size_t done = 0;
         while (done < r.len) {
             ssize_t n = pread(fds[r.file], r.addr + done, r.len - done, r.foff + (off_t) done);
@@ -121,6 +128,9 @@ struct arena {
         }
         // buffered read leaves a second copy in the page cache; drop it
         posix_fadvise(fds[r.file], r.foff, r.len, POSIX_FADV_DONTNEED);
+        io_bytes += r.len;
+        io_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                     std::chrono::steady_clock::now() - t0).count();
     }
 
     // O_DIRECT via the worker's private ring. Arena addresses are congruent
@@ -317,7 +327,7 @@ struct arena {
         // prefill layer-streaming: with a batch of tokens in flight the next
         // layers need nearly every expert - stream them (sequential, perfectly
         // predictable) while this layer computes; plan-hint them for the evictor
-        if (pstream && n_tokens >= 16) {
+        if (pstream && n_tokens >= 64) {
             for (int d = 1; d <= 1 && l + d < n_layer; d++) {
                 if (!pageable[l + d]) continue;
                 {
@@ -330,6 +340,7 @@ struct arena {
         }
         if (queued) cv.notify_all();
         // block until every expert this layer needs is loaded
+        const auto ts0 = std::chrono::steady_clock::now();
         for (;;) {
             bool pending = false;
             {
@@ -344,6 +355,8 @@ struct arena {
             if (!pending) break;
             std::this_thread::yield();
         }
+        stall_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - ts0).count();
     }
 
     // ---- gate-ahead prediction ----
@@ -924,6 +937,7 @@ int main(int argc, char ** argv) {
         }
     }
     const double t_p1 = ggml_time_us() / 1e6;
+    g_ar.snapshot();  // decode-only deltas for the final stats print
 
     auto sp = llama_sampler_chain_default_params();
     llama_sampler * smpl = llama_sampler_chain_init(sp);
@@ -1025,6 +1039,14 @@ int main(int argc, char ** argv) {
                 h, m, h + m ? (double) h / (h + m) : 0.0);
         fprintf(stderr, "ACHILLES io: uring_ok=%" PRIu64 " fallback=%" PRIu64 "\n",
                 g_ar.n_uring.load(), g_ar.n_fallback.load());
+        const double d_stall = (g_ar.stall_ns - g_ar.snap[0]) / 1e9;
+        const double d_gb    = (g_ar.io_bytes - g_ar.snap[1]) / 1e9;
+        const double d_ios   = (g_ar.io_ns    - g_ar.snap[2]) / 1e9;
+        const uint64_t d_hit = g_ar.n_hit - g_ar.snap[3], d_miss = g_ar.n_miss - g_ar.snap[4];
+        fprintf(stderr, "ACHILLES decode-detail: stall=%.1fs io=%.1fGB io_worker_time=%.1fs "
+                "per_stream_bw=%.2fGB/s hit=%.3f (decode-only)\n",
+                d_stall, d_gb, d_ios, d_ios > 0 ? d_gb / d_ios : 0.0,
+                d_hit + d_miss ? (double) d_hit / (d_hit + d_miss) : 0.0);
     }
     fprintf(stderr, "OUTPUT: %.240s\n", text.c_str());
     llama_sampler_free(smpl);

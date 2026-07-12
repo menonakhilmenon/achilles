@@ -1,0 +1,39 @@
+--- ngl0 ---
+RUN FAILED: oom-kill
+0.00.016.901 I arena: 7 shard(s)
+0.00.571.764 I arena: 76 MoE layers x 256 experts, 221.8 GiB of experts total
+dgpu_vram_peak=1350M dgpu_gtt_peak=94M
+--- ngl40 ---
+0.00.024.756 I arena: 7 shard(s)
+0.00.359.551 I arena: 76 MoE layers x 256 experts, 221.8 GiB of experts total
+0.41.635.723 E arena: layer 78 proj 0 not mappable, stays kernel-paged
+0.41.635.726 E arena: layer 78 proj 1 not mappable, stays kernel-paged
+0.41.635.726 E arena: layer 78 proj 2 not mappable, stays kernel-paged
+0.41.635.731 I arena: replaced 218.6 GiB with anonymous expert memory, budget 22.0 GiB
+ACHILLES prefill: 23 tok in 43.8s = 0.52 tok/s
+ACHILLES decode:  48 tok in 88.1s = 0.545 tok/s
+ACHILLES arena: prefetch=41231 demand=6114 evict=45413 hit=25792 miss=9064 (hit rate 0.740)
+dgpu_vram_peak=15483M dgpu_gtt_peak=154M
+--- ngl99 ---
+0.00.023.971 I arena: 7 shard(s)
+0.00.225.112 I arena: 76 MoE layers x 256 experts, 221.8 GiB of experts total
+0.43.223.658 E arena: layer 78 proj 0 not mappable, stays kernel-paged
+0.43.223.660 E arena: layer 78 proj 1 not mappable, stays kernel-paged
+0.43.223.660 E arena: layer 78 proj 2 not mappable, stays kernel-paged
+0.43.223.666 I arena: replaced 218.6 GiB with anonymous expert memory, budget 30.0 GiB
+ACHILLES prefill: 23 tok in 42.6s = 0.54 tok/s
+ACHILLES decode:  48 tok in 75.3s = 0.637 tok/s
+ACHILLES arena: prefetch=38637 demand=5593 evict=41601 hit=26197 miss=8690 (hit rate 0.751)
+dgpu_vram_peak=15830M dgpu_gtt_peak=3909M
+--- repro ---
+0.00.025.089 I arena: 7 shard(s)
+0.00.305.492 I arena: 76 MoE layers x 256 experts, 221.8 GiB of experts total
+0.44.484.959 E arena: layer 78 proj 0 not mappable, stays kernel-paged
+0.44.484.962 E arena: layer 78 proj 1 not mappable, stays kernel-paged
+0.44.484.962 E arena: layer 78 proj 2 not mappable, stays kernel-paged
+0.44.484.976 I arena: replaced 218.6 GiB with anonymous expert memory, budget 30.0 GiB
+ACHILLES prefill: 23 tok in 18.7s = 1.23 tok/s
+ACHILLES decode:  24 tok in 38.7s = 0.620 tok/s
+ACHILLES arena: prefetch=10001 demand=8882 evict=16253 hit=11450 miss=9037 (hit rate 0.559)
+dgpu_vram_peak=15830M dgpu_gtt_peak=3909M
+REGRESS_DONE
