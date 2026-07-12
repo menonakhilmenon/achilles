@@ -88,7 +88,7 @@ struct arena {
     std::condition_variable jcv;
     std::vector<std::pair<int,int>> pending_drops;
     size_t pending_drop_bytes = 0;  // evicted-but-not-yet-madvised (real RSS!)
-    int delta = 3, fetch = 10;
+    int delta = 3, fetch = 10, pstream = 1;
     float decay = 0.98f;
     bool lru = true;                    // Belady analysis: LRU 61% vs LFU 50% on GLM-5.2
     uint64_t touch_clock = 1000;        // starts above the 1.5 prefetch floor
@@ -249,7 +249,7 @@ struct arena {
     void enqueue(int l, int e, int prio) {
         std::lock_guard<std::mutex> lk(mu);
         if (!pageable[l]) return;
-        if (prio > 0 && q.size() >= 96) return; // never starve the demand path
+        if (prio > 2 && q.size() >= 96) return; // throttle only far speculation
         const int i = idx(l, e);
         if (valid[i] || inflight[i]) return;
         for (const auto &r : q) if (r.layer == l && r.expert == e) return;
@@ -286,6 +286,20 @@ struct arena {
                         }
                     }
                 }
+            }
+        }
+        // prefill layer-streaming: with a batch of tokens in flight the next
+        // layers need nearly every expert - stream them (sequential, perfectly
+        // predictable) while this layer computes; plan-hint them for the evictor
+        if (pstream && n_tokens >= 16) {
+            for (int d = 1; d <= 2 && l + d < n_layer; d++) {
+                if (!pageable[l + d]) continue;
+                {
+                    std::lock_guard<std::mutex> lk(mu);
+                    for (int e = 0; e < n_expert; e++) plan_hint[idx(l + d, e)] = pass_id;
+                }
+                for (int e = 0; e < n_expert; e++) enqueue(l + d, e, d);
+                queued = true;
             }
         }
         if (queued) cv.notify_all();
@@ -404,7 +418,8 @@ static arena g_ar;
 static bool g_on = true;
 static std::string g_ppl_file;
 static int g_ppl_n = 600;
-static int g_spec = 0;  // n-gram lookup speculation depth (0 = off)
+static int g_spec = 0;
+static int g_pstream = 1;  // prefill layer-streaming (0 = off)  // n-gram lookup speculation depth (0 = off)
 static FILE * g_dump = nullptr;  // trace dump: 'H' l n h[fp32*n] | 'T' l k ids[i32*k]
 static std::mutex g_dump_mu;
 static int g_workers = 6;
@@ -665,6 +680,7 @@ int main(int argc, char ** argv) {
             }
         }
         else if (a == "--spec") g_spec = atoi(argv[++i]);
+        else if (a == "--pstream") g_ar.pstream = atoi(argv[++i]);
         else if (a == "--dump") g_dump = fopen(argv[++i], "wb");
         else if (a == "--probe") {
             FILE * pf = fopen(argv[++i], "rb");
