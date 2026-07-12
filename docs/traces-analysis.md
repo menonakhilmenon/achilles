@@ -309,6 +309,38 @@ remaining io_uring/O_DIRECT + prefetch-throttling headroom is real but bounded
 by the bytes, not the latency. Every further tok/s on the beast must come from
 hit rate: trained probe, better retention policy, or more RAM.
 
+### 15. v2 complete: io_uring O_DIRECT + policy tuning — final Phase 2 numbers
+
+io_uring with per-worker private rings and O_DIRECT (arena addresses are
+congruent with file offsets mod 4 KiB, so alignment is free; 200k+ ops, zero
+fallbacks — btrfs stores these GGUFs uncompressed), prefetch throttling
+(queue ≥ 96 drops prefetch, demand never starves), tunable LFU decay.
+
+**GLM-5.2 (744B) final on this box** (42 GiB budget ≈ 19% resident, GPU dense):
+
+| config | tok/s |
+|---|---|
+| naive kernel three-tier | 0.30 |
+| arena, demand-only (no prefetch) | 0.42 |
+| arena, buffered preads | 0.62 |
+| arena + io_uring + pure LFU, 48-tok | **0.70** |
+| arena + io_uring, 128-tok steady state | 0.55 (52.5% hit) |
+
+Honest band: **0.55–0.70 tok/s ≈ 2× naive**, content-dependent. Ablations:
+gate-ahead prefetch +66%; io_uring/O_DIRECT + cache-drop ~+15% (bytes are the
+wall, as §14 predicted); pure LFU beats decayed on short runs (decay matters
+for long-session domain shifts — keep it a flag).
+
+**GLM-4.5-Air (110B) final**: 3.2–3.4 tok/s at the 24 G envelope (2.7× kernel,
+~12% off the overlap-perfect ceiling). At full 60 GB RAM this model simply
+fits: 15.3 tok/s hybrid.
+
+**Remaining backlog (v3)**: trained linear probe (hit rate is the only lever
+left on the beast), VRAM hot-expert tier (~8 GB free on the 9070 XT ≈ +4 pp
+residency), prefill layer-streaming, and — dominating all of it — a RAM
+upgrade to 128 GB, which the recalibrated math says is worth more than every
+remaining software optimization combined for GLM-5.2.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity

@@ -144,6 +144,17 @@ Test model: GLM-4.5-Air with a cgroup RAM cap (emulates the POC ratio cheaply).
 simulator predictions validated against reality (then we can trust it for sizing the
 beast).
 
+**STATUS (2026-07-12): Phase 2 executed ahead of schedule and beyond scope** — the
+runtime was built as a llama.cpp wrapper (v1 page-cache steering → v2 owned arena
+with MAP_FIXED tensor replacement + io_uring O_DIRECT; see traces-analysis.md
+§12–14 and src/). Gates: Air beats stock mmap 2.7× at the POC ratio ✓; the
+simulator's structure validated but its hit-rate extrapolation to 256-expert
+layers was optimistic (measured 45–47% at 17–19% residency vs assumed ~85%) —
+recalibrated in §14. GLM-5.2 itself (skipping ahead of the 150 GB POC model)
+runs at 0.70 tok/s = 2.3× naive; the ~150 GB Phase 4 target class is expected to
+land near Air-like ratios (3+ tok/s). Remaining v2 backlog: trained probe
+integration, VRAM hot-expert tier, prefill layer-streaming.
+
 ## Phase 3 — Learned predictor (2–3 weeks, overlaps Phase 2)
 
 - [ ] Train per-layer (or shared, layer-embedded) MLP: hidden state at layer l →
