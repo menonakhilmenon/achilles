@@ -366,6 +366,32 @@ Revisit post-heatsink/Gen5 (with backpressure now in place) where its 30%
 byte reduction converts directly to tok/s. Same story for the trained probes.
 Remaining backlog: prefill layer-streaming; learned evictor (Belady gap 19 pp).
 
+### 17. The rolling plan: prediction-driven EVICTION is the byte-free win
+
+Owner's architecture realized: the predictor maintains a rolling plan of
+upcoming expert needs; the preloader executes it and the **evictor consults
+it** (`plan_hint`: experts predicted for the remainder of the token get a soft
+eviction penalty — approximate Belady). Measured on GLM-5.2:
+
+| config | hit rate | tok/s (3 runs) |
+|---|---|---|
+| pre-plan baseline | 41.2% | 0.74–0.76 |
+| **plan-aware eviction (gate-ahead hints)** | **55.5%** | **0.83 / 0.90 / 0.945** |
+| + far-stage Δ8 probe *fetching* | 51.7% | 0.77–0.82 (worse — adds bytes) |
+
+Three structural lessons, now measured twice each:
+1. On SSD-bound hardware, **spending prediction accuracy on eviction is free**
+   (no bytes added); spending it on more fetching backfires.
+2. Cross-token prediction is dead on GLM-5.2 (26% ceiling; probes can't beat
+   it; prev-token trace features add nothing) — plans must roll within-token.
+3. Warm-started Δ8 probes recall 52%@8 (+11 pp over gate-ahead) — the hint
+   horizon can extend to ~100 ms; use them as *hints*, not fetches.
+
+**Day-2 final: GLM-5.2 at 0.83–0.94 tok/s, quality-exact — 3× the naive floor,
+software only.** Projected with owner's planned heatsink + Gen5 drive (+
+optional headless ~47 GiB budget): **~2.5–3.5 tok/s**, at which point RAM
+bandwidth becomes the wall.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
