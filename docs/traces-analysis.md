@@ -425,8 +425,30 @@ The feared "0↔12G memory oscillation" appears **in both configs equally**
 sweeps (janitor `fadvise` + cgroup pressure) — a bounded sawtooth around a
 ~8 GB mean, not a leak and not pstream's doing. The GLM staged-run "thrash"
 was this sawtooth plus the crash loop, misattributed. `--pstream 1` is back on
-in bench/staged_run.sh; GLM-scale confirmation folds into the next FULL-window
-combined re-measure.
+in bench/staged_run.sh.
+
+**GLM-5.2 confirmation (same day, FULL profile after two more environment
+bugs — see below):** first successful long-prompt GLM runs ever. ~2700-token
+prompt, 30 GiB budget, hybrid on the 9070 XT:
+
+| config | prefill tok/s | demand loads | decode (8 tok, post-prefill cold cache) |
+|---|---|---|---|
+| pstream=0 | 6.83 | 101,781 | 0.525 |
+| **pstream=1** | **8.67 (+27%)** | **2,756** | 0.530 |
+
+Envelope held both legs (peak 45.0 G < 48 G max, mean ~41 G). Naive three-tier
+prefill was ~0.5 tok/s — the managed runtime prefills **~17× faster**.
+
+Two environment gotchas cost four dead runs before this measurement, both now
+guarded in the repo:
+1. `ttm.pages_limit=1048576` (from the TTM-leak fix) also caps **total live
+   GTT at 4 GB** — amdgpu sizes its GTT domain from it at boot. Hybrid GLM
+   needs ~5.5 GB GTT (measured); the karg is now 8388608 (32 G default), with
+   only `page_pool_size` keeping the 4 GB pool cap that actually fixes the leak.
+2. **Vulkan device enumeration order flips across boots** — the hardcoded
+   `GGML_VK_VISIBLE_DEVICES=1` landed GLM's 25 GB dense skeleton on the iGPU
+   (`amdgpu_vm_validate` ENOMEM → `vk::DeviceLostError` at the first ubatch
+   upload). bench/vkdev.sh now resolves the dGPU index by name at runtime.
 
 ## Implications for the runtime design
 

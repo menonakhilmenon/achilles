@@ -1,0 +1,4 @@
+0.00.059.015 I arena: 7 shard(s)
+0.00.622.664 I arena: 76 MoE layers x 256 experts, 221.8 GiB of experts total
+mem: min=1M max=28746M mean=15472M max_2s_swing=16821M samples=15
+GLM_DONE

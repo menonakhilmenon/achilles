@@ -7,11 +7,12 @@ serves the misses — with a predictor steering both prefetch and eviction.
 
 ## Status (2026-07-12): it works
 
-| GLM-5.2 UD-Q2_K_XL decode | tok/s |
-|---|---|
-| naive kernel paging (mmap) | 0.30 |
-| **achilles-arena, full profile** | **0.83–0.94** |
-| polite profile (desktop usable) | ~0.4–0.5 |
+| GLM-5.2 UD-Q2_K_XL | naive (kernel mmap) | **achilles-arena, full profile** |
+|---|---|---|
+| decode | 0.30 tok/s | **0.83–0.94 tok/s** |
+| prefill (~2700-token prompt) | ~0.5 tok/s | **8.7 tok/s** (layer-streaming, +27% over demand paging) |
+
+Polite profile (desktop stays usable): ~0.4–0.5 tok/s decode.
 
 GLM-4.5-Air (110B) runs at 3.4 tok/s memory-constrained / 15.3 unconstrained.
 Output is token-identical to unpaged inference — the arena is bit-exact.

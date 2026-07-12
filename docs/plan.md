@@ -249,8 +249,11 @@ Remaining backlog, ranked by expected payoff ÷ effort:
 1. ~~**Prefill thrash diagnosis** (task #19)~~ — **RESOLVED 2026-07-12** (§18 of
    traces-analysis.md): the "thrash" was a long-prompt crash bug in the eval
    callback (zero-row output slice on non-final ubatches), pstream-independent.
-   Fixed; pstream measured **+22% prefill** on Qwen, re-enabled in staged_run.sh.
-   GLM-scale confirmation folds into item 5.
+   Fixed; pstream measured **+22% prefill** on Qwen and **+27% on GLM-5.2**
+   (8.67 vs 6.83 tok/s, first successful long-prompt GLM runs — §18). Along
+   the way: ttm.pages_limit karg corrected (was silently capping GTT at 4G)
+   and Vulkan device now resolved by name (bench/vkdev.sh) since enumeration
+   order flips across boots.
 2. **Learned reuse-distance evictor** — LRU hits .609 vs Belady .798 at 19%
    residency: a 19pp hit-rate gap, and hit rate is the direct tok/s lever.
    Train a small reuse-distance head on the same dump streams as the probes.
