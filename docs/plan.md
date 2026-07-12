@@ -238,4 +238,16 @@ paging.
 - Quality floor for the beast: are Q2 experts (~82% quality) acceptable, or is Q4 the bar?
   (On this box GLM-5.2 is Q2-only anyway until the SSD tier proves itself — Q4 is 380 GB
   of a 2 TB drive, fine on disk, but per-token traffic doubles.)
-- What is the eventual 36 GB VRAM device? (Doesn't block Phases 0–4.)
+- ~~What is the eventual 36 GB VRAM device?~~ → **a MacBook Pro with 36 GB unified
+  memory** (owner, 2026-07-12). Recalibrated targets:
+  - Unified memory = one 36 GB pool for weights+KV+cache (no separate VRAM tier);
+    Apple Silicon bandwidth 150–270 GB/s (chip-dependent) makes compute fast, and
+    Apple NVMe reads 5–8 GB/s — but usable expert budget is only ~24–26 GB.
+  - **GLM-5.2 (225 GB experts) at ~11% residency → ~0.5–1 tok/s ceiling even with
+    perfect engineering** — the bytes wall again. The beast is a desktop-class goal.
+  - **GLM-4.5-Air-class (~40 GB experts) at ~55–60% residency → est. 4–6 tok/s —
+    genuinely usable.** The right MacBook target is Air / a future GLM-5-Air.
+  - Porting notes: llama.cpp Metal backend; the MAP_FIXED anonymous-replacement
+    trick and pread worker pool port (macOS supports both); io_uring does not —
+    keep the thread-pool path; O_DIRECT → F_NOCACHE, fadvise → F_RDADVISE,
+    eviction → MADV_FREE_REUSABLE. A modest platform shim, not a rewrite.
