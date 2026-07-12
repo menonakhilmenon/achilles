@@ -450,6 +450,34 @@ guarded in the repo:
    (`amdgpu_vm_validate` ENOMEM → `vk::DeviceLostError` at the first ubatch
    upload). bench/vkdev.sh now resolves the dGPU index by name at runtime.
 
+### 19. Reuse-distance eviction: hazard analysis → gap/pop policy (+4–6% decode)
+
+Attacking the LRU→Belady gap (19 pp at 19% residency). Measured the reuse
+hazard on the GLM streams (scripts/reuse_hazard.py): **h(g) is monotone
+decreasing** (0.29 at gap 1 → ~0.03 plateau — so LRU's recency instinct is
+right and there is no periodic structure), and **popularity multiplies the
+hazard ~3× at every gap** — the one signal LRU wastes.
+
+Model-based policies that ignore the burst autocorrelation LOSE outright
+(geometric −10 pp, 2-state Markov −8 pp vs LRU — measured, sim). The winner
+is minimal: **evict max staleness / EWMA-popularity** ("gap/pop"). Sim: +2.2 pp
+hit over LRU at 14% residency, +1 pp over idealized plan-LRU. Everything
+beyond (~17 pp to Belady) requires future-stream knowledge — features cannot
+close it; speculation×plan lookahead is the only route.
+
+Live (--policy reuse, one EWMA/expert, decay LUT, prefetch grace period):
+
+| decode | LRU | reuse |
+|---|---|---|
+| Qwen3-30B, 256 tok (×2 pairs) | 8.47 / 8.53 tok/s (.873) | **8.99 / 9.08 (+6%)** (.875) |
+| GLM-5.2, 192 tok | 0.616 tok/s (.760) | **0.639 (+3.7%)** (.766) |
+| GLM-5.2, 48 tok | 0.643 (.710) | 0.641 (.714) — EWMA not yet converged |
+
+Signature in both models: ~equal hit rate but **7–13% fewer prefetches and
+6–12% fewer evictions** — the policy stops evicting experts that were about
+to be re-fetched. Needs ~50+ tokens to warm up (α=0.02). Now the default in
+bench/staged_run.sh.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity

@@ -254,9 +254,11 @@ Remaining backlog, ranked by expected payoff ÷ effort:
    the way: ttm.pages_limit karg corrected (was silently capping GTT at 4G)
    and Vulkan device now resolved by name (bench/vkdev.sh) since enumeration
    order flips across boots.
-2. **Learned reuse-distance evictor** — LRU hits .609 vs Belady .798 at 19%
-   residency: a 19pp hit-rate gap, and hit rate is the direct tok/s lever.
-   Train a small reuse-distance head on the same dump streams as the probes.
+2. ~~**Learned reuse-distance evictor**~~ — **DONE 2026-07-12** (§19): hazard
+   analysis → gap/popularity policy (`--policy reuse`), +6% Qwen / +3.7% GLM
+   decode, now default in staged_run.sh. Key negative: features can't close
+   the remaining ~17pp to Belady — that headroom is future-stream knowledge,
+   i.e. item 4 (speculation × plan) got more valuable.
 3. **Expert-major shadow repack** — offline tool rewrites experts contiguously
    (gate/up/down co-located per expert) into a shadow file; the arena's range
    table just points there. Fewer, larger, aligned reads: +20–40% effective
