@@ -28,6 +28,7 @@
 #include "gguf.h"
 
 #include <fcntl.h>
+#include <liburing.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <algorithm>
@@ -53,7 +54,8 @@ struct file_map { int file; uintptr_t start, end; size_t foff; };
 
 struct arena {
     std::vector<std::string> paths;
-    std::vector<int> fds;
+    std::vector<int> fds;         // buffered
+    std::vector<int> fds_direct;  // O_DIRECT (io_uring path); -1 if unavailable
     std::vector<file_map> maps;
     int n_layer = 0, n_expert = 0, n_embd = 0;
     bool sigmoid_bias = false;
@@ -83,23 +85,54 @@ struct arena {
     std::deque<std::pair<int, std::vector<float>>> sq;
     std::thread scorer;
     int delta = 3, fetch = 10;
+    float decay = 0.98f;
 
-    std::atomic<uint64_t> n_prefetch{0}, n_evict{0}, n_hit{0}, n_miss{0}, n_demand{0};
+    std::atomic<uint64_t> n_prefetch{0}, n_evict{0}, n_hit{0}, n_miss{0}, n_demand{0}, n_uring{0}, n_fallback{0};
 
     int idx(int l, int e) const { return l * n_expert + e; }
 
-    void do_load(int l, int e) {
-        for (const auto &r : ranges[l][e]) {
+    void load_buffered(const load_range &r) {
+        size_t done = 0;
+        while (done < r.len) {
+            ssize_t n = pread(fds[r.file], r.addr + done, r.len - done, r.foff + (off_t) done);
+            if (n <= 0) { LOG_ERR("pread failed\n"); abort(); }
+            done += (size_t) n;
+        }
+        // buffered read leaves a second copy in the page cache; drop it
+        posix_fadvise(fds[r.file], r.foff, r.len, POSIX_FADV_DONTNEED);
+    }
+
+    // O_DIRECT via the worker's private ring. Arena addresses are congruent
+    // with file offsets mod 4096, so aligning the file range down/up keeps the
+    // buffer aligned too; overshoot writes neighbouring experts' bytes with
+    // identical data (benign) and never leaves the anonymous region.
+    void do_load(int l, int e, io_uring * ring) {
+        const auto &rs = ranges[l][e];
+        int submitted = 0;
+        for (const auto &r : rs) {
             if (!r.addr || r.len == 0) continue;
-            size_t done = 0;
-            while (done < r.len) {
-                ssize_t n = pread(fds[r.file], r.addr + done, r.len - done, r.foff + (off_t) done);
-                if (n <= 0) { LOG_ERR("pread failed l=%d e=%d\n", l, e); abort(); }
-                done += (size_t) n;
+            if (!ring || fds_direct[r.file] < 0) { load_buffered(r); continue; }
+            const off_t  a_off = r.foff & ~(off_t) 4095;
+            const size_t head  = (size_t) (r.foff - a_off);
+            const size_t a_len = (r.len + head + 4095) & ~(size_t) 4095;
+            io_uring_sqe * sqe = io_uring_get_sqe(ring);
+            if (!sqe) { load_buffered(r); continue; }
+            io_uring_prep_read(sqe, fds_direct[r.file], r.addr - head, (unsigned) a_len, a_off);
+            io_uring_sqe_set_data(sqe, (void *) &r);
+            submitted++;
+        }
+        if (!submitted) return;
+        io_uring_submit_and_wait(ring, submitted);
+        for (int i = 0; i < submitted; i++) {
+            io_uring_cqe * cqe = nullptr;
+            if (io_uring_wait_cqe(ring, &cqe) < 0) { LOG_ERR("cqe wait failed\n"); abort(); }
+            if (cqe->res < 0) { // e.g. compressed extent rejecting O_DIRECT
+                load_buffered(*(const load_range *) io_uring_cqe_get_data(cqe));
+                n_fallback++;
+            } else {
+                n_uring++;
             }
-            // buffered read leaves a second copy in the page cache; drop it
-            // (our anon copy is the only one we want) — O_DIRECT supersedes
-            posix_fadvise(fds[r.file], r.foff, r.len, POSIX_FADV_DONTNEED);
+            io_uring_cqe_seen(ring, cqe);
         }
     }
 
@@ -136,12 +169,14 @@ struct arena {
     }
 
     void worker() {
+        io_uring ring;
+        io_uring * pring = io_uring_queue_init(16, &ring, 0) == 0 ? &ring : nullptr;
         while (!stop) {
             req r;
             {
                 std::unique_lock<std::mutex> lk(mu);
                 cv.wait(lk, [&] { return stop.load() || !q.empty(); });
-                if (stop) return;
+                if (stop) break;
                 std::pop_heap(q.begin(), q.end(), [](const req &a, const req &b) { return a.prio > b.prio; });
                 r = q.back();
                 q.pop_back();
@@ -149,7 +184,7 @@ struct arena {
                 if (valid[i] || inflight[i]) continue;
                 inflight[i] = 1;
             }
-            do_load(r.layer, r.expert);
+            do_load(r.layer, r.expert, pring);
             std::vector<std::pair<int,int>> victims;
             {
                 std::lock_guard<std::mutex> lk(mu);
@@ -163,11 +198,13 @@ struct arena {
             for (auto [l, e] : victims) drop(l, e);
             if (r.prio == 0) n_demand++; else n_prefetch++;
         }
+        if (pring) io_uring_queue_exit(pring);
     }
 
     void enqueue(int l, int e, int prio) {
         std::lock_guard<std::mutex> lk(mu);
         if (!pageable[l]) return;
+        if (prio > 0 && q.size() >= 96) return; // never starve the demand path
         const int i = idx(l, e);
         if (valid[i] || inflight[i]) return;
         for (const auto &r : q) if (r.layer == l && r.expert == e) return;
@@ -181,7 +218,7 @@ struct arena {
         bool queued = false;
         {
             std::lock_guard<std::mutex> lk(mu);
-            if (l <= cur_layer) { pass_id++; for (auto &s : score) s *= 0.98f; }
+            if (l <= cur_layer) { pass_id++; if (decay < 1.0f) for (auto &s : score) s *= decay; }
             cur_layer = l;
             for (int t = 0; t < n_tokens; t++) {
                 for (int i2 = 0; i2 < k; i2++) {
@@ -356,6 +393,7 @@ static bool load_meta(const std::string &model_path) {
         gguf_context * g = gguf_init_from_file(g_ar.paths[fi].c_str(), gp);
         if (!g) { LOG_ERR("arena: gguf parse failed: %s\n", g_ar.paths[fi].c_str()); return false; }
         g_ar.fds.push_back(open(g_ar.paths[fi].c_str(), O_RDONLY));
+        g_ar.fds_direct.push_back(open(g_ar.paths[fi].c_str(), O_RDONLY | O_DIRECT));
 
         if (!have_kv) {
             const int ia = gguf_find_key(g, "general.architecture");
@@ -497,6 +535,7 @@ int main(int argc, char ** argv) {
         if (a == "--budget-gib") budget_gib = atof(argv[++i]);
         else if (a == "--delta") g_ar.delta = atoi(argv[++i]);
         else if (a == "--fetch") g_ar.fetch = atoi(argv[++i]);
+        else if (a == "--decay") g_ar.decay = (float) atof(argv[++i]);
         else if (a == "--workers") g_workers = atoi(argv[++i]);
         else if (a == "--no-pager") g_on = false;
         else if (a == "--stats") stats = true;
@@ -567,6 +606,8 @@ int main(int argc, char ** argv) {
                 " evict=%" PRIu64 " hit=%" PRIu64 " miss=%" PRIu64 " (hit rate %.3f)\n",
                 g_ar.n_prefetch.load(), g_ar.n_demand.load(), g_ar.n_evict.load(),
                 h, m, h + m ? (double) h / (h + m) : 0.0);
+        fprintf(stderr, "ACHILLES io: uring_ok=%" PRIu64 " fallback=%" PRIu64 "\n",
+                g_ar.n_uring.load(), g_ar.n_fallback.load());
     }
     fprintf(stderr, "OUTPUT: %.240s\n", text.c_str());
     llama_sampler_free(smpl);
