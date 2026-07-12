@@ -97,6 +97,9 @@ struct arena {
                 if (n <= 0) { LOG_ERR("pread failed l=%d e=%d\n", l, e); abort(); }
                 done += (size_t) n;
             }
+            // buffered read leaves a second copy in the page cache; drop it
+            // (our anon copy is the only one we want) — O_DIRECT supersedes
+            posix_fadvise(fds[r.file], r.foff, r.len, POSIX_FADV_DONTNEED);
         }
     }
 

@@ -281,6 +281,34 @@ validity), evicted with `MADV_DONTNEED` (anonymous memory — no kernel fights).
   Δ), multi-shard GGUF (needed for GLM-5.2), and a VRAM hot-expert tier.
   Achieved 2.7× of the measured 2.5–4.5× headroom with none of those yet.
 
+### 14. GLM-5.2 through the arena: 2.1× the naive floor; honest ceiling revised
+
+Multi-shard arena (7 shards, 218.6 GiB of experts under management, 38 GiB
+budget = 17% resident, dense skeleton in VRAM):
+
+| GLM-5.2 UD-Q2_K_XL, 48-tok decode | tok/s |
+|---|---|
+| naive three-tier (kernel mmap) | 0.30 |
+| arena v2 | 0.53 |
+| arena v2 + post-read page-cache drop | **0.617 (2.1×)** |
+
+Air progression at the 24 G envelope meanwhile reached **3.37 tok/s** (kernel
+1.23 → v1 1.63 → spike 2.61 → multi-shard+SIMD+inline-scoring 3.37), within
+~12% of its overlap-perfect ceiling.
+
+**Revised outlook for GLM-5.2 on this box**: measured global hit rate at 17%
+residency is 45% (the Qwen-extrapolated sim assumed ~85–90%, which needs ~2×
+the RAM). At 45% hit, per-token demand is ~3.8 GB; even at burst-class 7 GB/s
+with O_DIRECT that bounds decode at ~1.5–1.8 tok/s. So on 64 GB of RAM the
+realistic v2-complete target is **~1–1.5 tok/s GLM-5.2 decode** (5× naive);
+the earlier ~3.5–4 figure requires ~128 GB RAM (where the same math gives
+~75%+ hit rates), or Air-class models (which already run at 3.4).
+
+Effective SSD throughput during the run was ~2.3 GB/s vs 7.5 burst — the
+remaining io_uring/O_DIRECT + prefetch-throttling headroom is real but bounded
+by the bytes, not the latency. Every further tok/s on the beast must come from
+hit rate: trained probe, better retention policy, or more RAM.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
