@@ -84,6 +84,9 @@ struct arena {
     std::condition_variable scv;
     std::deque<std::pair<int, std::vector<float>>> sq;
     std::thread scorer;
+    std::thread janitor;
+    std::condition_variable jcv;
+    std::vector<std::pair<int,int>> pending_drops;
     int delta = 3, fetch = 10;
     float decay = 0.98f;
     bool lru = true;                    // Belady analysis: LRU 61% vs LFU 50% on GLM-5.2
@@ -152,8 +155,8 @@ struct arena {
         }
     }
 
-    std::vector<std::pair<int,int>> evict_to_budget_locked() {
-        std::vector<std::pair<int,int>> victims;
+    void evict_to_budget_locked() {
+        auto &victims = pending_drops;
         while (resident_bytes > budget) {
             float best = 1e30f; int bl = -1, be = -1;
             for (int l = 0; l < n_layer; l++) {
@@ -171,7 +174,19 @@ struct arena {
             victims.push_back({bl, be});
             n_evict++;
         }
-        return victims;
+    }
+
+    void janitor_loop() {
+        while (!stop) {
+            std::vector<std::pair<int,int>> victims;
+            {
+                std::unique_lock<std::mutex> lk(mu);
+                jcv.wait(lk, [&] { return stop.load() || !pending_drops.empty(); });
+                if (stop) return;
+                victims.swap(pending_drops);
+            }
+            for (auto [l, e] : victims) drop(l, e);
+        }
     }
 
     void worker() {
@@ -191,7 +206,6 @@ struct arena {
                 inflight[i] = 1;
             }
             do_load(r.layer, r.expert, pring);
-            std::vector<std::pair<int,int>> victims;
             {
                 std::lock_guard<std::mutex> lk(mu);
                 const int i = idx(r.layer, r.expert);
@@ -199,9 +213,9 @@ struct arena {
                 valid[i] = 1;
                 score[i] = std::max(score[i], 1.5f);
                 resident_bytes += bytes_of[r.layer];
-                victims = evict_to_budget_locked();
+                evict_to_budget_locked();
             }
-            for (auto [l, e] : victims) drop(l, e);
+            jcv.notify_one();
             if (r.prio == 0) n_demand++; else n_prefetch++;
         }
         if (pring) io_uring_queue_exit(pring);
@@ -651,6 +665,7 @@ int main(int argc, char ** argv) {
         if (!install_arena()) return 1;
         for (int i = 0; i < g_workers; i++) g_ar.workers.emplace_back([] { g_ar.worker(); });
         g_ar.scorer = std::thread([] { g_ar.score_loop(); });
+        g_ar.janitor = std::thread([] { g_ar.janitor_loop(); });
     }
 
     const llama_vocab * vocab = llama_model_get_vocab(model);
@@ -694,8 +709,10 @@ int main(int argc, char ** argv) {
         g_ar.stop = true;
         g_ar.cv.notify_all();
         g_ar.scv.notify_all();
+        g_ar.jcv.notify_all();
         for (auto &w : g_ar.workers) w.join();
         if (g_ar.scorer.joinable()) g_ar.scorer.join();
+        if (g_ar.janitor.joinable()) g_ar.janitor.join();
         return 0;
     }
 
@@ -789,8 +806,10 @@ int main(int argc, char ** argv) {
     g_ar.stop = true;
     g_ar.cv.notify_all();
     g_ar.scv.notify_all();
+    g_ar.jcv.notify_all();
     for (auto &w : g_ar.workers) w.join();
     if (g_ar.scorer.joinable()) g_ar.scorer.join();
+    if (g_ar.janitor.joinable()) g_ar.janitor.join();
 
     fprintf(stderr, "\nACHILLES prefill: %zu tok in %.1fs = %.2f tok/s\n",
             toks.size(), t_p1 - t_p0, toks.size() / (t_p1 - t_p0));
