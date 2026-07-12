@@ -284,6 +284,7 @@ struct arena {
             std::lock_guard<std::mutex> lk(mu);
             if (l <= cur_layer) { pass_id++; if (!lru && decay < 1.0f) for (auto &s : score) s *= decay; }
             cur_layer = l;
+            std::vector<uint8_t> counted(n_tokens > 1 ? n_expert : 0, 0);  // stats: unique per callback
             for (int t = 0; t < n_tokens; t++) {
                 for (int i2 = 0; i2 < k; i2++) {
                     int e = ids[t * k + i2];
@@ -296,8 +297,10 @@ struct arena {
                         pop_up[i] = pass_id;
                     }
                     last_pass[i] = pass_id;
-                    if (valid[i]) { n_hit++; continue; }
-                    n_miss++;
+                    const bool count = counted.empty() || !counted[e];
+                    if (!counted.empty()) counted[e] = 1;
+                    if (valid[i]) { if (count) n_hit++; continue; }
+                    if (count) n_miss++;
                     if (!inflight[i]) {
                         bool dup = false;
                         for (const auto &r : q) if (r.layer == l && r.expert == e) { dup = true; break; }
