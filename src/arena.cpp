@@ -292,7 +292,7 @@ struct arena {
         // layers need nearly every expert - stream them (sequential, perfectly
         // predictable) while this layer computes; plan-hint them for the evictor
         if (pstream && n_tokens >= 16) {
-            for (int d = 1; d <= 2 && l + d < n_layer; d++) {
+            for (int d = 1; d <= 1 && l + d < n_layer; d++) {
                 if (!pageable[l + d]) continue;
                 {
                     std::lock_guard<std::mutex> lk(mu);
@@ -602,6 +602,14 @@ static bool load_meta(const std::string &model_path) {
 static bool install_arena() {
     g_ar.init_mappings();
     if (g_ar.maps.empty()) { LOG_ERR("arena: no model mappings found\n"); return false; }
+    // the loader faulted ~all dense tensors through these mappings while
+    // uploading to VRAM; those pages stay resident (mapped, so fadvise can't
+    // touch them) and cost ~12GB of cgroup budget on GLM-5.2. Drop the whole
+    // mappings now: dense is in VRAM, experts aren't loaded yet, and edges
+    // refault from file on demand.
+    for (const auto &m : g_ar.maps) {
+        madvise((void *) m.start, m.end - m.start, MADV_DONTNEED);
+    }
     const long pg = sysconf(_SC_PAGESIZE);
     size_t replaced = 0;
     g_ar.pageable.assign(g_ar.n_layer, 0);
@@ -643,6 +651,9 @@ static bool install_arena() {
             }
         }
         g_ar.pageable[l] = layer_ok;
+    }
+    for (int fd : g_ar.fds) {
+        posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED); // dense upload leftovers
     }
     LOG_INF("arena: replaced %.1f GiB with anonymous expert memory, budget %.1f GiB\n",
             replaced / (double) (1 << 30), g_ar.budget / (double) (1 << 30));
@@ -809,7 +820,14 @@ int main(int argc, char ** argv) {
         common_tokenize(lctx, params.prompt, llama_vocab_get_add_bos(vocab), true);
 
     const double t_p0 = ggml_time_us() / 1e6;
-    if (llama_decode(lctx, llama_batch_get_one(toks.data(), (int32_t) toks.size()))) return 1;
+    {   // chunked prefill: llama_decode caps batches at n_batch tokens
+        const int nb = (int) llama_n_batch(lctx);
+        for (size_t off = 0; off < toks.size(); off += nb) {
+            const int n = (int) std::min(toks.size() - off, (size_t) nb);
+            llama_batch pb = llama_batch_get_one(toks.data() + off, n);
+            if (llama_decode(lctx, pb)) { LOG_ERR("prefill chunk failed\n"); return 1; }
+        }
+    }
     const double t_p1 = ggml_time_us() / 1e6;
 
     auto sp = llama_sampler_chain_default_params();
