@@ -44,6 +44,8 @@
 #include <chrono>
 #include <vector>
 
+extern bool g_no_uring;  // fwd (defined after arena)
+
 struct load_range {           // contiguous piece of an expert, trimmed to arena
     uint8_t * addr = nullptr;
     int       file = 0;
@@ -208,7 +210,7 @@ struct arena {
 
     void worker() {
         io_uring ring;
-        io_uring * pring = io_uring_queue_init(16, &ring, 0) == 0 ? &ring : nullptr;
+        io_uring * pring = (!g_no_uring && io_uring_queue_init(16, &ring, 0) == 0) ? &ring : nullptr;
         while (!stop) {
             req r;
             {
@@ -425,6 +427,7 @@ static int g_pstream = 1;  // prefill layer-streaming (0 = off)  // n-gram looku
 static FILE * g_dump = nullptr;  // trace dump: 'H' l n h[fp32*n] | 'T' l k ids[i32*k]
 static std::mutex g_dump_mu;
 static int g_workers = 6;
+bool g_no_uring = false;
 
 static bool cb_arena(struct ggml_tensor * t, bool ask, void *) {
     const bool is_topk = strncmp(t->name, "ffn_moe_topk-", 13) == 0;
@@ -714,6 +717,7 @@ int main(int argc, char ** argv) {
         }
         else if (a == "--workers") g_workers = atoi(argv[++i]);
         else if (a == "--no-pager") g_on = false;
+        else if (a == "--no-uring") g_no_uring = true;
         else if (a == "--stats") stats = true;
         else args.push_back(argv[i]);
     }
