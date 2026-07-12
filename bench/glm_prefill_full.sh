@@ -22,7 +22,7 @@ for ps in 1 0; do
   systemd-run --user --unit $UNIT -p WorkingDirectory=/var/home/akhil/achilles \
     -p MemoryHigh=44G -p MemoryMax=48G -p MemorySwapMax=2G \
     bash -c "GGML_VK_VISIBLE_DEVICES=$VKDEV exec src/achilles-arena -m '$M' -f '$T/longprompt.txt' \
-      -n 8 -t 10 -ngl 99 -ot exps=CPU --budget-gib 30 --workers 6 --no-uring --pstream $ps --stats > $LOG 2>&1"
+      -n 8 -t 10 -ngl 99 -ot exps=CPU --budget-gib 30 --workers 6 --pstream $ps --stats > $LOG 2>&1"
   CG=$(systemctl --user show $UNIT.service -p ControlGroup --value)
   echo "--- pstream=$ps ---" >> "$OUT"
   SAMP=$T/glm-full-mem-ps$ps.txt; : > "$SAMP"

@@ -17,7 +17,7 @@ for pol in lru reuse; do
     -p MemoryHigh=44G -p MemoryMax=48G -p MemorySwapMax=2G \
     bash -c "GGML_VK_VISIBLE_DEVICES=$VKDEV exec src/achilles-arena -m '$M' \
       -p 'Explain how mixture-of-experts language models work, covering routing, expert specialization, and why sparsity helps.' \
-      -n 192 -t 10 -ngl 99 -ot exps=CPU --budget-gib 30 --workers 6 --no-uring --pstream 1 --policy $pol --stats > $LOG 2>&1"
+      -n 192 -t 10 -ngl 99 -ot exps=CPU --budget-gib 30 --workers 6 --pstream 1 --policy $pol --stats > $LOG 2>&1"
   while systemctl --user is-active --quiet $UNIT.service; do sleep 5; done
   echo "--- policy=$pol ---" >> "$OUT"
   grep -aE "prefill|decode|arena:|DeviceLost|GGML_ASSERT" "$LOG" >> "$OUT"

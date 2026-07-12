@@ -1,0 +1,21 @@
+--- nouring ---
+ACHILLES decode:  48 tok in 57.0s = 0.842 tok/s
+ACHILLES io: uring_ok=0 fallback=0
+ACHILLES decode-detail: stall=39.2s io=157.4GB io_worker_time=147.0s per_stream_bw=1.07GB/s hit=0.636 (decode-only)
+cgroup_peak=43G
+--- uring ---
+ACHILLES decode:  48 tok in 42.8s = 1.122 tok/s
+ACHILLES io: uring_ok=56802 fallback=0
+ACHILLES decode-detail: stall=25.3s io=0.0GB io_worker_time=0.0s per_stream_bw=0.00GB/s hit=0.637 (decode-only)
+cgroup_peak=43G
+--- nouring ---
+ACHILLES decode:  48 tok in 57.0s = 0.842 tok/s
+ACHILLES io: uring_ok=0 fallback=0
+ACHILLES decode-detail: stall=39.2s io=157.4GB io_worker_time=147.2s per_stream_bw=1.07GB/s hit=0.636 (decode-only)
+cgroup_peak=43G
+--- uring ---
+ACHILLES decode:  48 tok in 42.8s = 1.122 tok/s
+ACHILLES io: uring_ok=56799 fallback=0
+ACHILLES decode-detail: stall=25.4s io=0.0GB io_worker_time=0.0s per_stream_bw=0.00GB/s hit=0.637 (decode-only)
+cgroup_peak=43G
+AB_DONE

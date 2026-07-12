@@ -153,6 +153,7 @@ struct arena {
             submitted++;
         }
         if (!submitted) return;
+        const auto t0 = std::chrono::steady_clock::now();
         io_uring_submit_and_wait(ring, submitted);
         for (int i = 0; i < submitted; i++) {
             io_uring_cqe * cqe = nullptr;
@@ -161,10 +162,13 @@ struct arena {
                 load_buffered(*(const load_range *) io_uring_cqe_get_data(cqe));
                 n_fallback++;
             } else {
+                io_bytes += (size_t) cqe->res;
                 n_uring++;
             }
             io_uring_cqe_seen(ring, cqe);
         }
+        io_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                     std::chrono::steady_clock::now() - t0).count();
     }
 
     void drop(int l, int e) {

@@ -22,7 +22,7 @@ systemctl --user reset-failed $UNIT 2>/dev/null
 systemd-run --user --unit $UNIT -p WorkingDirectory=/var/home/akhil/achilles \
   -p MemoryHigh=32G -p MemoryMax=36G -p MemorySwapMax=2G -p Nice=10 -p IOWeight=10 \
   bash -c "GGML_VK_VISIBLE_DEVICES=$VKDEV exec src/achilles-arena -m '$M' -f '$T/longprompt.txt' \
-    -n 8 -t 6 -ngl 99 -ot exps=CPU --budget-gib 20 --workers 4 --no-uring --pstream 1 --stats > $LOG 2>&1"
+    -n 8 -t 6 -ngl 99 -ot exps=CPU --budget-gib 20 --workers 4 --pstream 1 --stats > $LOG 2>&1"
 CG=$(systemctl --user show $UNIT.service -p ControlGroup --value)
 SAMP=$T/glm-prefill-mem.txt; : > "$SAMP"
 while systemctl --user is-active --quiet $UNIT.service; do

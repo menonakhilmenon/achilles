@@ -24,7 +24,7 @@ run_cfg() {
     -p MemoryHigh=44G -p MemoryMax=48G -p MemorySwapMax=2G -p IOWeight=50 \
     bash -c "GGML_VK_VISIBLE_DEVICES=$VKDEV exec src/achilles-arena -m '$M' \
       -p 'Explain how mixture-of-experts language models work, covering routing, expert specialization, and why sparsity helps.' \
-      $* --workers 6 --no-uring --stats > $LOG 2>&1"
+      $* --workers 6 --stats > $LOG 2>&1"
   VMAX=0; GMAX=0
   while systemctl --user is-active --quiet $UNIT.service; do
     for c in /sys/class/drm/card*/device; do

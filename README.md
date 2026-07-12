@@ -9,7 +9,7 @@ serves the misses — with a predictor steering both prefetch and eviction.
 
 | GLM-5.2 UD-Q2_K_XL | naive (kernel mmap) | **achilles-arena, full profile** |
 |---|---|---|
-| decode | 0.30 tok/s | **0.83 tok/s** (cold, controlled, ±0.005 reproducible) |
+| decode | 0.30 tok/s | **1.12 tok/s** (cold, controlled; io_uring O_DIRECT, §22) |
 | prefill (~2700-token prompt) | ~0.5 tok/s | **8.7 tok/s** (layer-streaming, +27% over demand paging) |
 
 Polite profile (desktop stays usable): ~0.4–0.5 tok/s decode. Earlier 0.94

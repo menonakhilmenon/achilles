@@ -19,7 +19,7 @@ while IFS= read -r prompt; do
     -p MemoryHigh=22G -p MemoryMax=26G -p MemorySwapMax=1G -p Nice=10 -p IOWeight=10 \
     bash -c "GGML_VK_VISIBLE_DEVICES=$VKDEV exec src/achilles-arena -m '$M' \
       -p '$(printf "%s" "$prompt" | sed "s/'/'\\\\''/g")' \
-      -n 192 -t 6 --budget-gib 14 --workers 4 --no-uring --policy lru \
+      -n 192 -t 6 --budget-gib 14 --workers 4 --policy lru \
       --dump traces/qwen-prompts/$id.bin --stats > $T/trace-$id.log 2>&1" 2>/dev/null
   echo "$id: $(grep -ac . traces/qwen-prompts/$id.bin 2>/dev/null || echo '?') $(grep -aE 'decode:' $T/trace-$id.log | tail -1)"
 done < bench/prompts20.txt

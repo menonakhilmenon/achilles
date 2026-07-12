@@ -19,7 +19,7 @@ for pol in lru reuse; do
     -p MemoryHigh=20G -p MemoryMax=24G -p MemorySwapMax=1G -p Nice=10 -p IOWeight=10 \
     bash -c "GGML_VK_VISIBLE_DEVICES=$VKDEV exec src/achilles-arena -m '$M' \
       -p 'Write a detailed technical explanation of how flash attention reduces memory bandwidth requirements in transformer inference, covering tiling, softmax rescaling, and the IO complexity analysis.' \
-      -n 256 -t 6 --budget-gib 5 --workers 4 --no-uring --policy $pol --stats > $LOG 2>&1"
+      -n 256 -t 6 --budget-gib 5 --workers 4 --policy $pol --stats > $LOG 2>&1"
   while systemctl --user is-active --quiet $UNIT.service; do sleep 2; done
   echo "--- policy=$pol ---" >> "$OUT"
   grep -aE "prefill|decode|arena:" "$LOG" >> "$OUT"

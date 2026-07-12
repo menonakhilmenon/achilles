@@ -541,6 +541,25 @@ Meta-lesson for every future benchmark here: **on a saturated SSD, tok/s is
 set by total bytes moved, not hit rate** — hit .796 at fetch 10 lost to hit
 .581 at fetch 1 by 25%. Optimize bytes, then overlap, then hits.
 
+### 22. io_uring exonerated and enabled: +33%, GLM-5.2 crosses 1 tok/s
+
+`--no-uring` had been baked into every script during the memory-leak hunt;
+the TTM root cause (§16/§18) exonerated io_uring, and §21 made bytes the
+binding constraint — so the buffered path's page-cache copy + cgroup-reclaim
+tax on every miss byte became the next target. A/B at the §21 best config
+(fetch 2, reuse, pstream), two alternating pairs, cold:
+
+| decode | buffered (--no-uring) | **io_uring O_DIRECT** |
+|---|---|---|
+| tok/s | 0.842 / 0.842 | **1.122 / 1.122 (+33%)** |
+| stall | 39.2 s / 48 tok | 25.3 s |
+| cgroup peak | 43 G | 43 G (identical — no leak, fear retired) |
+| O_DIRECT fallbacks | — | 0 |
+
+**GLM-5.2 decode ≥ 1 tok/s for the first time: 1.12 cold, 3.7× naive.**
+io_uring is now the default in every bench script; `--no-uring` remains a
+flag for filesystems that reject O_DIRECT.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
