@@ -246,9 +246,11 @@ Parked / dead ends (don't revisit without new evidence):
 
 Remaining backlog, ranked by expected payoff ÷ effort:
 
-1. **Prefill thrash diagnosis** (task #19) — debug on Qwen3-30B (13× smaller,
-   zero desktop impact). Prefill is the worst user-visible latency today;
-   layer-streaming was supposed to fix it and currently can't be enabled.
+1. ~~**Prefill thrash diagnosis** (task #19)~~ — **RESOLVED 2026-07-12** (§18 of
+   traces-analysis.md): the "thrash" was a long-prompt crash bug in the eval
+   callback (zero-row output slice on non-final ubatches), pstream-independent.
+   Fixed; pstream measured **+22% prefill** on Qwen, re-enabled in staged_run.sh.
+   GLM-scale confirmation folds into item 5.
 2. **Learned reuse-distance evictor** — LRU hits .609 vs Belady .798 at 19%
    residency: a 19pp hit-rate gap, and hit rate is the direct tok/s lever.
    Train a small reuse-distance head on the same dump streams as the probes.

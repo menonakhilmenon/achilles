@@ -18,7 +18,7 @@ rm -f /tmp/claude-1000/gate
 systemd-run --user --unit $UNIT -p WorkingDirectory=/var/home/akhil/achilles -p MemoryHigh=44G -p MemoryMax=48G -p MemorySwapMax=2G \
   bash -c "GGML_VK_VISIBLE_DEVICES=1 exec /var/home/akhil/achilles/src/achilles-arena -m '$M' \
     -p 'Explain how mixture-of-experts language models work, covering routing, expert specialization, and why sparsity helps.' \
-    -n 24 -t 10 -ngl 99 -ot exps=CPU --budget-gib 30 --workers 6 --no-uring --pstream 0 --stats > $LOG 2>&1"
+    -n 24 -t 10 -ngl 99 -ot exps=CPU --budget-gib 30 --workers 6 --no-uring --pstream 1 --stats > $LOG 2>&1"
 
 # wait for the arena install marker, then raise the ceiling for decode
 for i in $(seq 1 120); do

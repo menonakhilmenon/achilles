@@ -392,6 +392,42 @@ software only.** Projected with owner's planned heatsink + Gen5 drive (+
 optional headless ~47 GiB budget): **~2.5–3.5 tok/s**, at which point RAM
 bandwidth becomes the wall.
 
+### 18. The "prefill thrash" was a crash bug; layer-streaming is a +22% prefill win
+
+Debugged on Qwen3-30B (13× smaller than GLM — POLITE-profile, desktop unaffected).
+Reproduction attempt #1 found the truth immediately: **every long-prompt run
+crashed, pstream on or off** — `GGML_ASSERT(offset + size <= ggml_nbytes)` inside
+our own eval callback.
+
+Root cause: the gate-ahead norm hook gated "single token" on `ne[1] == 1`, but the
+graph hands norms over as reshaped 3D `[n_embd, 1, n_tokens]` — `ne[1]` is *always*
+1, tokens live in `ne[2]`. For layers 0..n-2 this silently scored gate-ahead from
+token 0's hidden during prefill (wrong, in-bounds). The last layer is sliced to
+output rows only, and non-final prefill ubatches have **zero** output rows:
+`ne=[2048,1,0]`, `nbytes=0` — the 8 KB hidden-state read aborted. Short prompts
+(one ubatch, always has an output row) never trigger it, which is why every short
+benchmark passed and every long-prompt run "mysteriously" died — including all
+GLM prefill A/B attempts. Fix: gate on `ggml_nrows(t)==1` + a zero-element guard.
+
+With the crash gone, the first clean pstream A/B (Qwen, ~2900-token prompt,
+5 GiB budget ≈ 30% residency, 2 runs each, page cache evicted between runs):
+
+| config | prefill tok/s | decode tok/s | demand loads | prefetch loads |
+|---|---|---|---|---|
+| pstream=0 | 30.5 / 30.5 | 4.2–4.4 | 27,8xx | 1,7xx |
+| **pstream=1** | **37.1 / 37.2 (+22%)** | 4.2–4.4 | **1,031** | 37,80x |
+
+Streaming the next layer's full expert set during the current layer's compute
+eliminates 96% of demand stalls at identical byte traffic. Decode untouched.
+
+The feared "0↔12G memory oscillation" appears **in both configs equally**
+(max 1s swing 7–13 GB): it is the buffered-read page cache being reclaimed in
+sweeps (janitor `fadvise` + cgroup pressure) — a bounded sawtooth around a
+~8 GB mean, not a leak and not pstream's doing. The GLM staged-run "thrash"
+was this sawtooth plus the crash loop, misattributed. `--pstream 1` is back on
+in bench/staged_run.sh; GLM-scale confirmation folds into the next FULL-window
+combined re-measure.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
