@@ -87,6 +87,7 @@ struct arena {
     std::thread janitor;
     std::condition_variable jcv;
     std::vector<std::pair<int,int>> pending_drops;
+    size_t pending_drop_bytes = 0;  // evicted-but-not-yet-madvised (real RSS!)
     int delta = 3, fetch = 10;
     float decay = 0.98f;
     bool lru = true;                    // Belady analysis: LRU 61% vs LFU 50% on GLM-5.2
@@ -171,6 +172,7 @@ struct arena {
             if (bl < 0) break;
             valid[idx(bl, be)] = 0;
             resident_bytes -= bytes_of[bl];
+            pending_drop_bytes += bytes_of[bl];
             victims.push_back({bl, be});
             n_evict++;
         }
@@ -185,7 +187,13 @@ struct arena {
                 if (stop) return;
                 victims.swap(pending_drops);
             }
-            for (auto [l, e] : victims) drop(l, e);
+            size_t freed = 0;
+            for (auto [l, e] : victims) { drop(l, e); freed += bytes_of[l]; }
+            {
+                std::lock_guard<std::mutex> lk(mu);
+                pending_drop_bytes -= std::min(freed, pending_drop_bytes);
+            }
+            cv.notify_all(); // wake loaders blocked on backpressure
         }
     }
 
@@ -203,6 +211,15 @@ struct arena {
                 q.pop_back();
                 const int i = idx(r.layer, r.expert);
                 if (valid[i] || inflight[i]) continue;
+                // backpressure: real footprint = resident + not-yet-dropped;
+                // never let it run more than 2 GiB past budget (was the source
+                // of 17-27 GB zram storms during prefill eviction bursts)
+                cv.wait(lk, [&] {
+                    return stop.load() ||
+                           resident_bytes + pending_drop_bytes < budget + (2ULL << 30);
+                });
+                if (stop) break;
+                jcv.notify_one();
                 inflight[i] = 1;
             }
             do_load(r.layer, r.expert, pring);

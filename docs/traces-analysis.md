@@ -341,6 +341,31 @@ residency), prefill layer-streaming, and — dominating all of it — a RAM
 upgrade to 128 GB, which the recalibrated math says is worth more than every
 remaining software optimization combined for GLM-5.2.
 
+### 16. Stability engineering: janitor + backpressure; final day-2 numbers
+
+The bimodal results (0.37–1.00 tok/s on identical configs) were memory-lifecycle
+bugs, found via journald swap-peak forensics and fixed in two steps:
+1. **Janitor thread**: eviction was accounted instantly but `madvise` drops
+   queued behind busy workers → real RSS ran past the budget → 20–27 GB zram
+   storms on unlucky runs.
+2. **Backpressure**: prefill eviction bursts still outran the janitor; loaders
+   now block when resident + pending-drop bytes exceed budget + 2 GiB.
+
+Result: **GLM-5.2 decode 0.757 / 0.740 tok/s across repeat runs (±1%)** — no
+bias, LRU, budget 34 GiB. The reproducible day-2 scoreboard:
+
+| GLM-5.2 (744B) | tok/s |
+|---|---|
+| naive kernel three-tier | 0.30 |
+| arena final (stable, quality-exact) | **0.75 (2.5×)** |
+
+**Routing bias — parked by owner decision**: it demonstrably moves hit rate
+(45→63%, quality within the 3% bar at 0.05) but showed no *reliable* speed win
+in the SSD-saturated regime, and the owner prefers zero quality perturbation.
+Revisit post-heatsink/Gen5 (with backpressure now in place) where its 30%
+byte reduction converts directly to tok/s. Same story for the trained probes.
+Remaining backlog: prefill layer-streaming; learned evictor (Belady gap 19 pp).
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
