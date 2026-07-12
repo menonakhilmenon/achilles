@@ -174,6 +174,32 @@ OS), `-ngl 99 -ot "exps=CPU"` = dense+attention+KV in VRAM, experts in RAM:
   the dGPU with `GGML_VK_VISIBLE_DEVICES=1` (the iGPU enumerates first with 33 GB
   of GTT/host memory — itself interesting as a future pinned-staging path).
 
+### 10. Three-tier stack live-fired: GPU + RAM + SSD on GLM-4.5-Air
+
+Full stack test (`bench/air_tiers2.sh`): dense skeleton in VRAM, experts in a
+RAM budget enforced by `MemoryHigh` (model evicted from page cache before each
+run so the scope faults its own pages), overflow paged from NVMe by the kernel:
+
+| RAM budget | resident | decode tok/s | NVMe read for 256 tokens |
+|---|---|---|---|
+| 48 GB (100%) | 44.2 GiB | **15.30 ± .14** | 45 GB (model load only) |
+| 32 GB (72%) | 31.8 GiB | 4.24 ± 1.39 | 140 GB |
+| 24 GB (54%) | 23.8 GiB | 1.67 ± .02 | 518 GB |
+| 16 GB (36%) | 15.8 GiB | 0.85 ± .00 | 1,146 GB |
+
+- **Naive mmap paging collapses**: 3.6× slower at 72% resident, 18× at 36%. This
+  is the floor the managed runtime replaces — and it collapses for measurable,
+  fixable reasons, not because the SSD is too slow.
+- **The kernel moves 2–3× the true demand**: at 24 GB, real expert demand is
+  ~300 GB (measured ~46% miss × ~2.6 GB/token) but 518 GB crossed the bus —
+  4 KiB fault granularity, blind readahead, and churn. An O_DIRECT expert-granular
+  arena reclaims this before prediction contributes anything.
+- **Headroom for the design**: perfect caching+prefetch at these residencies pencils
+  to ~4–5 tok/s (54%) and ~3.5–4 (36%) vs 1.67 / 0.85 naive → **2.5–4.5× win
+  available on identical hardware**, consistent with the simulator's structure.
+- Naive paging variance is severe (±33% at 32 GB) — deadline-scheduled prefetch
+  should also flatten p99, not just the mean.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity

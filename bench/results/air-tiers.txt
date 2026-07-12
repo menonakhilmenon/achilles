@@ -1,0 +1,12 @@
+=== MemoryHigh=48G ===
+| glm4moe 106B.A12B Q2_K - Medium |  44.18 GiB |   110.47 B | Vulkan     |  99 |      10 | exps=CPU              |           tg128 |         15.32 ± 0.11 |
+nvme read: 41032 MiB in 25s (incl model load)
+=== MemoryHigh=32G ===
+| glm4moe 106B.A12B Q2_K - Medium |  44.18 GiB |   110.47 B | Vulkan     |  99 |      10 | exps=CPU              |           tg128 |         15.16 ± 0.21 |
+nvme read: 37 MiB in 20s (incl model load)
+=== MemoryHigh=24G ===
+| glm4moe 106B.A12B Q2_K - Medium |  44.18 GiB |   110.47 B | Vulkan     |  99 |      10 | exps=CPU              |           tg128 |         15.41 ± 0.00 |
+nvme read: 1435 MiB in 19s (incl model load)
+=== MemoryHigh=16G ===
+| glm4moe 106B.A12B Q2_K - Medium |  44.18 GiB |   110.47 B | Vulkan     |  99 |      10 | exps=CPU              |           tg128 |         15.36 ± 0.01 |
+nvme read: 27 MiB in 19s (incl model load)

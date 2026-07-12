@@ -1,0 +1,12 @@
+=== MemoryHigh=48G (resident before: 0.0 GiB) ===
+| glm4moe 106B.A12B Q2_K - Medium |  44.18 GiB |   110.47 B | Vulkan     |  99 |      10 | exps=CPU              |           tg128 |         15.30 ± 0.14 |
+nvme read: 45403 MiB in 25s; resident after: 44.2 GiB
+=== MemoryHigh=32G (resident before: 0.0 GiB) ===
+| glm4moe 106B.A12B Q2_K - Medium |  44.18 GiB |   110.47 B | Vulkan     |  99 |      10 | exps=CPU              |           tg128 |          4.24 ± 1.39 |
+nvme read: 140297 MiB in 76s; resident after: 31.8 GiB
+=== MemoryHigh=24G (resident before: 0.0 GiB) ===
+| glm4moe 106B.A12B Q2_K - Medium |  44.18 GiB |   110.47 B | Vulkan     |  99 |      10 | exps=CPU              |           tg128 |          1.67 ± 0.02 |
+nvme read: 518486 MiB in 168s; resident after: 23.8 GiB
+=== MemoryHigh=16G (resident before: 0.0 GiB) ===
+| glm4moe 106B.A12B Q2_K - Medium |  44.18 GiB |   110.47 B | Vulkan     |  99 |      10 | exps=CPU              |           tg128 |          0.85 ± 0.00 |
+nvme read: 1146280 MiB in 318s; resident after: 15.8 GiB
