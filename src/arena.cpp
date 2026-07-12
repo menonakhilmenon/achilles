@@ -41,6 +41,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <chrono>
 #include <vector>
 
 struct load_range {           // contiguous piece of an expert, trimmed to arena
@@ -418,6 +419,7 @@ static arena g_ar;
 static bool g_on = true;
 static std::string g_ppl_file;
 static int g_ppl_n = 600;
+static std::string g_gate;  // wait for this file post-install (cgroup staging)
 static int g_spec = 0;
 static int g_pstream = 1;  // prefill layer-streaming (0 = off)  // n-gram lookup speculation depth (0 = off)
 static FILE * g_dump = nullptr;  // trace dump: 'H' l n h[fp32*n] | 'T' l k ids[i32*k]
@@ -674,6 +676,7 @@ int main(int argc, char ** argv) {
         else if (a == "--bias") g_ar.bias_strength = (float) atof(argv[++i]);
         else if (a == "--ppl") g_ppl_file = argv[++i];
         else if (a == "--ppl-n") g_ppl_n = atoi(argv[++i]);
+        else if (a == "--gate") g_gate = argv[++i];
         else if (a == "--probe-d8") {
             FILE * pf = fopen(argv[++i], "rb");
             if (pf) {
@@ -720,8 +723,39 @@ int main(int argc, char ** argv) {
     llama_backend_init();
     llama_numa_init(params.numa);
 
+    // load-phase janitor: llama's mmap loader floods the page cache with the
+    // whole model (47GB observed) while uploading dense tensors to VRAM, and
+    // actively-prefetched mapped pages resist cgroup reclaim -> OOM before
+    // prefill. Sweep the mappings every 3s during load; the loader refaults
+    // what it still needs, capping the flood at a few seconds of reads.
+    std::atomic<bool> loading{true};
+    std::thread load_janitor;
     if (g_on) {
         if (!load_meta(params.model.path)) return 1;
+        load_janitor = std::thread([&loading] {
+            while (loading) {
+                for (int i = 0; i < 30 && loading; i++) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+                FILE * f = fopen("/proc/self/maps", "r");
+                if (!f) continue;
+                char line[1024];
+                while (fgets(line, sizeof(line), f)) {
+                    for (const auto &path : g_ar.paths) {
+                        if (!strstr(line, path.c_str())) continue;
+                        uintptr_t a, b;
+                        if (sscanf(line, "%" SCNxPTR "-%" SCNxPTR, &a, &b) == 2) {
+                            madvise((void *) a, b - a, MADV_DONTNEED);
+                        }
+                    }
+                }
+                fclose(f);
+                // madvise only unmaps; drop the now-unmapped cache pages too
+                for (int fd : g_ar.fds) {
+                    posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
+                }
+            }
+        });
         if (g_ar.probe_mode) {  // trained probes replace router weights for scoring
             const size_t per = (size_t) g_ar.n_expert * g_ar.n_embd;
             int applied = 0;
@@ -762,7 +796,15 @@ int main(int argc, char ** argv) {
     if (!model || !lctx) return 1;
 
     if (g_on) {
+        loading = false;
+        if (load_janitor.joinable()) load_janitor.join();
         if (!install_arena()) return 1;
+        if (!g_gate.empty()) { // wait for the supervisor to raise the ceiling
+            LOG_INF("arena: waiting at gate %s\n", g_gate.c_str());
+            for (int i = 0; i < 1200 && access(g_gate.c_str(), F_OK) != 0; i++) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        }
         for (int i = 0; i < g_workers; i++) g_ar.workers.emplace_back([] { g_ar.worker(); });
         g_ar.scorer = std::thread([] { g_ar.score_loop(); });
         g_ar.janitor = std::thread([] { g_ar.janitor_loop(); });

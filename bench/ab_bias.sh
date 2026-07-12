@@ -14,7 +14,7 @@ for cfg in plain plain plain; do
     EXTRA="--probe models/glm52-probes-d3.bin --probe-d8 models/glm52-probes-d8.bin"
   fi
   GGML_VK_VISIBLE_DEVICES=1 src/achilles-arena -m "$M" -p "$P" -n 48 -t 10 -ngl 99 \
-    -ot "exps=CPU" --budget-gib 20 --delta 3 --fetch 8 --workers 6 $EXTRA --stats 2>&1 \
+    -ot "exps=CPU" --budget-gib 30 --delta 3 --fetch 8 --workers 6 $EXTRA --stats 2>&1 \
     | grep -aE "decode|arena: prefetch|probes applied" >> "$OUT"
 done
 echo "AB_DONE" >> "$OUT"
