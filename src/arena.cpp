@@ -86,6 +86,9 @@ struct arena {
     std::thread scorer;
     int delta = 3, fetch = 10;
     float decay = 0.98f;
+    bool lru = true;                    // Belady analysis: LRU 61% vs LFU 50% on GLM-5.2
+    uint64_t touch_clock = 1000;        // starts above the 1.5 prefetch floor
+    float bias_strength = 0.f;          // cache-aware routing bias (0 = off)
     bool probe_mode = false;  // rw holds trained probes for (l -> l+delta); score only d==delta
     int probe_layers = 0;
     std::vector<float> probe_data;
@@ -221,14 +224,15 @@ struct arena {
         bool queued = false;
         {
             std::lock_guard<std::mutex> lk(mu);
-            if (l <= cur_layer) { pass_id++; if (decay < 1.0f) for (auto &s : score) s *= decay; }
+            if (l <= cur_layer) { pass_id++; if (!lru && decay < 1.0f) for (auto &s : score) s *= decay; }
             cur_layer = l;
             for (int t = 0; t < n_tokens; t++) {
                 for (int i2 = 0; i2 < k; i2++) {
                     int e = ids[t * k + i2];
                     if (e < 0 || e >= n_expert) continue;
                     const int i = idx(l, e);
-                    score[i] += 1.0f;
+                    if (lru) score[i] = (float) ++touch_clock;
+                    else score[i] += 1.0f;
                     last_pass[i] = pass_id;
                     if (valid[i]) { n_hit++; continue; }
                     n_miss++;
@@ -342,6 +346,8 @@ struct arena {
 
 static arena g_ar;
 static bool g_on = true;
+static std::string g_ppl_file;
+static int g_ppl_n = 600;
 static FILE * g_dump = nullptr;  // trace dump: 'H' l n h[fp32*n] | 'T' l k ids[i32*k]
 static std::mutex g_dump_mu;
 static int g_workers = 6;
@@ -350,8 +356,32 @@ static bool cb_arena(struct ggml_tensor * t, bool ask, void *) {
     const bool is_topk = strncmp(t->name, "ffn_moe_topk-", 13) == 0;
     const bool is_norm = strncmp(t->name, "ffn_norm-", 9) == 0 ||
                          strncmp(t->name, "post_attn_norm-", 15) == 0;
-    if (ask) return g_on && (is_topk || (is_norm && t->ne[1] == 1));
+    // selection-probability tensor: safe to bias (mixture weights read the
+    // UNbiased probs tensor; only expert CHOICE is nudged toward residents)
+    const bool is_sel = strncmp(t->name, "ffn_moe_probs_biased-", 21) == 0;
+    if (ask) {
+        return g_on && (is_topk || (is_norm && t->ne[1] == 1) ||
+                        (is_sel && g_ar.bias_strength > 0.f));
+    }
     if (!g_on) return true;
+    if (is_sel && g_ar.bias_strength > 0.f && t->type == GGML_TYPE_F32) {
+        const int l = atoi(t->name + 21);
+        if (l >= 0 && l < g_ar.n_layer && g_ar.pageable[l]) {
+            const int E = (int) t->ne[0], T = (int) t->ne[1];
+            static std::vector<float> sel;
+            sel.resize((size_t) E * T);
+            ggml_backend_tensor_get(t, sel.data(), 0, sel.size() * 4);
+            {
+                std::lock_guard<std::mutex> lk(g_ar.mu);
+                for (int e = 0; e < E; e++) {
+                    if (!g_ar.valid[g_ar.idx(l, e)]) continue;
+                    for (int j = 0; j < T; j++) sel[(size_t) j * E + e] += g_ar.bias_strength;
+                }
+            }
+            ggml_backend_tensor_set(t, sel.data(), 0, sel.size() * 4);
+        }
+        return true;
+    }
     if (is_topk) {
         const int l = atoi(t->name + 13);
         const int k = (int) t->ne[0], n_tokens = (int) t->ne[1];
@@ -556,6 +586,10 @@ int main(int argc, char ** argv) {
         else if (a == "--delta") g_ar.delta = atoi(argv[++i]);
         else if (a == "--fetch") g_ar.fetch = atoi(argv[++i]);
         else if (a == "--decay") g_ar.decay = (float) atof(argv[++i]);
+        else if (a == "--policy") g_ar.lru = std::string(argv[++i]) != "lfu";
+        else if (a == "--bias") g_ar.bias_strength = (float) atof(argv[++i]);
+        else if (a == "--ppl") g_ppl_file = argv[++i];
+        else if (a == "--ppl-n") g_ppl_n = atoi(argv[++i]);
         else if (a == "--dump") g_dump = fopen(argv[++i], "wb");
         else if (a == "--probe") {
             FILE * pf = fopen(argv[++i], "rb");
@@ -618,6 +652,51 @@ int main(int argc, char ** argv) {
     }
 
     const llama_vocab * vocab = llama_model_get_vocab(model);
+
+    if (!g_ppl_file.empty()) {  // teacher-forced quality eval, then exit
+        FILE * tf = fopen(g_ppl_file.c_str(), "rb");
+        if (!tf) { LOG_ERR("ppl file missing\n"); return 1; }
+        std::string text;
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), tf)) > 0) text.append(buf, n);
+        fclose(tf);
+        std::vector<llama_token> tk = common_tokenize(lctx, text, true, false);
+        if ((int) tk.size() > g_ppl_n) tk.resize(g_ppl_n);
+        llama_batch batch = llama_batch_init((int) tk.size(), 0, 1);
+        for (size_t i = 0; i < tk.size(); i++) {
+            batch.token[i] = tk[i];
+            batch.pos[i] = (llama_pos) i;
+            batch.n_seq_id[i] = 1;
+            batch.seq_id[i][0] = 0;
+            batch.logits[i] = true;
+        }
+        batch.n_tokens = (int) tk.size();
+        const double t0 = ggml_time_us() / 1e6;
+        if (llama_decode(lctx, batch)) { LOG_ERR("ppl decode failed\n"); return 1; }
+        const int n_vocab = llama_vocab_n_tokens(vocab);
+        double nll = 0;
+        for (size_t i = 0; i + 1 < tk.size(); i++) {
+            const float * lg = llama_get_logits_ith(lctx, (int) i);
+            float mx = -1e30f;
+            for (int v = 0; v < n_vocab; v++) mx = std::max(mx, lg[v]);
+            double Z = 0;
+            for (int v = 0; v < n_vocab; v++) Z += exp((double) lg[v] - mx);
+            nll -= ((double) lg[tk[i + 1]] - mx) - log(Z);
+        }
+        const double t1 = ggml_time_us() / 1e6;
+        const double mean_nll = nll / (double) (tk.size() - 1);
+        fprintf(stderr, "\nACHILLES ppl: tokens=%zu mean_nll=%.5f ppl=%.3f bias=%.4f (%.0fs)\n",
+                tk.size(), mean_nll, exp(mean_nll), g_ar.bias_strength, t1 - t0);
+        llama_batch_free(batch);
+        g_ar.stop = true;
+        g_ar.cv.notify_all();
+        g_ar.scv.notify_all();
+        for (auto &w : g_ar.workers) w.join();
+        if (g_ar.scorer.joinable()) g_ar.scorer.join();
+        return 0;
+    }
+
     std::vector<llama_token> toks =
         common_tokenize(lctx, params.prompt, llama_vocab_get_add_bos(vocab), true);
 
