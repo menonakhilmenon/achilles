@@ -4,6 +4,7 @@
 # installed and swept. Single short run; results + peaks to stdout.
 set -u
 cd /var/home/akhil/achilles
+. bench/vkdev.sh
 M=models/glm52-gguf/UD-Q2_K_XL/GLM-5.2-UD-Q2_K_XL-00001-of-00007.gguf
 LOG=/tmp/claude-1000/staged.log
 UNIT=achilles-staged
@@ -16,7 +17,7 @@ fi
 systemctl --user reset-failed $UNIT.service 2>/dev/null
 rm -f /tmp/claude-1000/gate
 systemd-run --user --unit $UNIT -p WorkingDirectory=/var/home/akhil/achilles -p MemoryHigh=44G -p MemoryMax=48G -p MemorySwapMax=2G \
-  bash -c "GGML_VK_VISIBLE_DEVICES=1 exec /var/home/akhil/achilles/src/achilles-arena -m '$M' \
+  bash -c "GGML_VK_VISIBLE_DEVICES=$VKDEV exec /var/home/akhil/achilles/src/achilles-arena -m '$M' \
     -p 'Explain how mixture-of-experts language models work, covering routing, expert specialization, and why sparsity helps.' \
     -n 24 -t 10 -ngl 99 -ot exps=CPU --budget-gib 30 --workers 6 --no-uring --pstream 1 --stats > $LOG 2>&1"
 

@@ -5,6 +5,7 @@
 # model page cache evicted between runs; 1s cgroup memory sampler per run.
 set -u
 cd /var/home/akhil/achilles
+. bench/vkdev.sh
 M=models/qwen3-30b-a3b-gguf/Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf
 T=${CLAUDE_TMP:-/home/akhil/.claude/jobs/34438cab/tmp}
 OUT=bench/results/qwen-pstream-ab.txt
@@ -19,7 +20,7 @@ for ps in 0 1 0 1; do
   LOG=$T/qwen-ab-ps$ps-$RANDOM.log
   systemd-run --user --unit $UNIT -p WorkingDirectory=/var/home/akhil/achilles \
     -p MemoryHigh=20G -p MemoryMax=24G -p MemorySwapMax=1G -p Nice=10 -p IOWeight=10 \
-    bash -c "GGML_VK_VISIBLE_DEVICES=1 exec src/achilles-arena -m '$M' -f '$T/longprompt.txt' \
+    bash -c "GGML_VK_VISIBLE_DEVICES=$VKDEV exec src/achilles-arena -m '$M' -f '$T/longprompt.txt' \
       -n 8 -t 6 --budget-gib 5 --workers 4 --no-uring --pstream $ps --stats > $LOG 2>&1"
   CG=$(systemctl --user show $UNIT.service -p ControlGroup --value)
   echo "--- pstream=$ps ---" >> "$OUT"

@@ -1,0 +1,37 @@
+--- pstream=0 ---
+0.00.021.847 I arena: 1 shard(s)
+0.00.090.454 I arena: 48 MoE layers x 128 experts, 16.3 GiB of experts total
+0.06.703.137 I arena: replaced 16.3 GiB with anonymous expert memory, budget 5.0 GiB
+ACHILLES prefill: 2885 tok in 94.3s = 30.59 tok/s
+ACHILLES decode:  8 tok in 1.8s = 4.387 tok/s
+ACHILLES arena: prefetch=1696 demand=27827 evict=27665 hit=2671 miss=1085177 (hit rate 0.002)
+ACHILLES io: uring_ok=0 fallback=0
+mem: min=1M max=14080M mean=7768M max_1s_swing=13489M samples=103
+--- pstream=1 ---
+0.00.022.530 I arena: 1 shard(s)
+0.00.088.272 I arena: 48 MoE layers x 128 experts, 16.3 GiB of experts total
+0.06.388.305 I arena: replaced 16.3 GiB with anonymous expert memory, budget 5.0 GiB
+ACHILLES prefill: 2885 tok in 77.8s = 37.09 tok/s
+ACHILLES decode:  8 tok in 1.8s = 4.402 tok/s
+ACHILLES arena: prefetch=37802 demand=1031 evict=36975 hit=1064407 miss=23441 (hit rate 0.978)
+ACHILLES io: uring_ok=0 fallback=0
+mem: min=1M max=11604M mean=8296M max_1s_swing=7018M samples=86
+--- pstream=0 ---
+0.00.023.074 I arena: 1 shard(s)
+0.00.087.410 I arena: 48 MoE layers x 128 experts, 16.3 GiB of experts total
+0.06.050.228 I arena: replaced 16.3 GiB with anonymous expert memory, budget 5.0 GiB
+ACHILLES prefill: 2885 tok in 94.7s = 30.48 tok/s
+ACHILLES decode:  8 tok in 1.9s = 4.173 tok/s
+ACHILLES arena: prefetch=1703 demand=27829 evict=27674 hit=2697 miss=1085151 (hit rate 0.002)
+ACHILLES io: uring_ok=0 fallback=0
+mem: min=1M max=11255M mean=7847M max_1s_swing=9647M samples=103
+--- pstream=1 ---
+0.00.023.038 I arena: 1 shard(s)
+0.00.087.111 I arena: 48 MoE layers x 128 experts, 16.3 GiB of experts total
+0.06.056.616 I arena: replaced 16.3 GiB with anonymous expert memory, budget 5.0 GiB
+ACHILLES prefill: 2885 tok in 77.5s = 37.21 tok/s
+ACHILLES decode:  8 tok in 1.8s = 4.384 tok/s
+ACHILLES arena: prefetch=37801 demand=1031 evict=36974 hit=1064401 miss=23447 (hit rate 0.978)
+ACHILLES io: uring_ok=0 fallback=0
+mem: min=1M max=11905M mean=8462M max_1s_swing=9445M samples=86
+AB_DONE
