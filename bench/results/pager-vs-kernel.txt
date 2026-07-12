@@ -1,0 +1,20 @@
+--- kernel MemoryHigh=24G ---
+ACHILLES prefill: 23 tok in 11.6s = 1.99 tok/s
+ACHILLES decode:  64 tok in 52.0s = 1.231 tok/s
+OUTPUT:  sparsity helps.
+--- pager budget=15GiB cap=24G ---
+0.12.725.635 I pager: 2 mmap region(s) of model found
+ACHILLES prefill: 23 tok in 6.7s = 3.41 tok/s
+ACHILLES decode:  64 tok in 43.0s = 1.488 tok/s
+ACHILLES pager: prefetch=17767 evict=24924 demand_hit=21909 demand_miss=9235 (hit rate 0.703)
+OUTPUT:  sparsity helps.
+--- kernel MemoryHigh=16G ---
+ACHILLES prefill: 23 tok in 11.0s = 2.09 tok/s
+ACHILLES decode:  64 tok in 86.2s = 0.742 tok/s
+OUTPUT:  sparsity helps.
+--- pager budget=8GiB cap=16G ---
+0.15.941.403 I pager: 2 mmap region(s) of model found
+ACHILLES prefill: 23 tok in 6.7s = 3.43 tok/s
+ACHILLES decode:  64 tok in 77.0s = 0.831 tok/s
+ACHILLES pager: prefetch=28331 evict=42327 demand_hit=16040 demand_miss=15104 (hit rate 0.515)
+OUTPUT:  sparsity helps.

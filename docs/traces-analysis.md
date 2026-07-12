@@ -220,6 +220,40 @@ individually measured above.
 spins printing prompts on closed stdin — use `llama-bench` or `--single-turn` for
 unattended runs.)
 
+### 12. Phase 2 v1 shipped: achilles-pager beats the kernel by 13–33%
+
+`src/pager.cpp` — a llama.cpp wrapper (no fork): expert-slice map from the GGUF,
+`ffn_moe_topk`/`post_attn_norm` capture via the scheduler callback, gate-ahead
+prefetch (`fadvise WILLNEED`), decayed-LFU eviction (`madvise+fadvise DONTNEED`
+via `/proc/self/maps`), residency budget. GLM-4.5-Air Q2, 64-token decode, cold:
+
+| envelope | kernel mmap | pager demand-only | pager +gate-ahead | best |
+|---|---|---|---|---|
+| 24G (~52% experts) | 1.231 tok/s | 1.355 | 1.597 | **1.633 (+33%)** |
+| 16G (~28% experts) | 0.742 tok/s | 0.773 | 0.838 | **0.838 (+13%)** |
+
+What was learned (each iteration measured; see git history):
+1. **The topk callback fires before the expert matmul** → same-layer WILLNEED
+   turns serial 4 KiB faulting into parallel expert-sized readahead. Biggest
+   single win; demand-only already beats the kernel.
+2. **Gate-ahead prefetch is additive** (+15–18%) but zero-sum at capacity:
+   every prefetch insert evicts something else, so it only pays when prediction
+   beats LFU. Fresh prefetches must be protected from immediate eviction
+   (score floor), else they're evicted before use — cache pollution was v1.1's
+   failure (initially *slower* than the kernel).
+3. **Over-fetching saturates the throttled SSD** and starves the demand path —
+   the simulator's waste-bandwidth failure mode, reproduced live. fetch=9–10,
+   Δ=2–3 is the sweet spot with untrained gate-ahead.
+4. **Syscall placement matters**: DONTNEED page-table scans on the compute
+   thread cost ~15s per 64 tokens; moved to worker threads.
+5. **v1's structural ceiling**: fadvise has no queue-depth control, no
+   completion events, and WILLNEED may be dropped under pressure; misses still
+   fault at 4 KiB. At 70% hit rate the overlap-perfect budget is ~3.8 tok/s vs
+   1.63 measured → **the remaining 2.3× needs Phase 2 v2**: an O_DIRECT expert
+   arena with io_uring (explicit QD, completions, expert-granular reads) that
+   llama.cpp reads via a custom buffer, plus the trained probe (+20 pp recall
+   at long Δ) to make prefetch decisively better than LFU.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
