@@ -1,0 +1,15 @@
+--- policy=lru ---
+0.00.023.008 I arena: 1 shard(s)
+0.00.089.621 I arena: 48 MoE layers x 128 experts, 16.3 GiB of experts total
+0.08.248.181 I arena: replaced 16.3 GiB with anonymous expert memory, budget 5.0 GiB
+ACHILLES prefill: 31 tok in 4.4s = 7.00 tok/s
+ACHILLES decode:  256 tok in 30.0s = 8.534 tok/s
+ACHILLES arena: prefetch=34983 demand=4996 evict=38108 hit=95999 miss=13969 (hit rate 0.873)
+--- policy=reuse ---
+0.00.024.050 I arena: 1 shard(s)
+0.00.089.515 I arena: 48 MoE layers x 128 experts, 16.3 GiB of experts total
+0.08.145.067 I arena: replaced 16.3 GiB with anonymous expert memory, budget 5.0 GiB
+ACHILLES prefill: 31 tok in 4.5s = 6.89 tok/s
+ACHILLES decode:  256 tok in 28.5s = 8.988 tok/s
+ACHILLES arena: prefetch=30270 demand=5278 evict=33678 hit=96224 miss=13744 (hit rate 0.875)
+AB_DONE

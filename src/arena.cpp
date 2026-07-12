@@ -69,6 +69,8 @@ struct arena {
 
     // state (mu-protected)
     std::vector<float> score;
+    std::vector<float> pop;          // reuse policy: EWMA activation rate
+    std::vector<uint32_t> pop_up;    // pass of last pop update (lazy decay)
     std::vector<uint8_t> valid, inflight, pageable;
     std::vector<uint32_t> last_pass;
     uint32_t pass_id = 0;
@@ -94,6 +96,8 @@ struct arena {
     int delta = 3, fetch = 10, pstream = 1;
     float decay = 0.98f;
     bool lru = true;                    // Belady analysis: LRU 61% vs LFU 50% on GLM-5.2
+    bool reuse = false;                 // gap/pop reuse-distance policy (sim: +2pp over LRU)
+    static constexpr float POP_ALPHA = 0.02f, POP_MIN = 1e-4f;
     uint64_t touch_clock = 1000;        // starts above the 1.5 prefetch floor
     float bias_strength = 0.f;          // cache-aware routing bias (0 = off)
     bool probe_mode = false;  // rw holds trained probes for (l -> l+delta); score only d==delta
@@ -174,6 +178,13 @@ struct arena {
                     if (!valid[i] || inflight[i]) continue;
                     if (last_pass[i] == pass_id && l >= cur_layer - 1) continue;
                     float sc2 = score[i];
+                    if (reuse) {  // keep-worthiness = decayed popularity / staleness
+                        static float dk[256] = {0};
+                        if (dk[0] == 0.f) for (int g = 0; g < 256; g++) dk[g] = powf(1.f - POP_ALPHA, (float) g);
+                        const uint32_t g = std::min(pass_id - pop_up[i], 255u);
+                        const float pd = std::max(dk[g] * pop[i], POP_MIN);
+                        sc2 = pd / (float) (pass_id - last_pass[i] + 1);
+                    }
                     if (!plan_hint.empty() && plan_hint[i] == pass_id && l > cur_layer) {
                         sc2 += 1e12f; // planned for the rest of this token: evict last
                     }
@@ -240,6 +251,11 @@ struct arena {
                 inflight[i] = 0;
                 valid[i] = 1;
                 score[i] = std::max(score[i], 1.5f);
+                if (reuse) {  // fresh prefetch: grace period against instant eviction
+                    pop[i] = std::max(pop[i], POP_ALPHA);
+                    pop_up[i] = pass_id;
+                    last_pass[i] = pass_id;
+                }
                 resident_bytes += bytes_of[r.layer];
                 evict_to_budget_locked();
             }
@@ -275,6 +291,10 @@ struct arena {
                     const int i = idx(l, e);
                     if (lru) score[i] = (float) ++touch_clock;
                     else score[i] += 1.0f;
+                    if (reuse && pop_up[i] != pass_id) {  // one Bernoulli obs per pass
+                        pop[i] = powf(1.f - POP_ALPHA, (float) (pass_id - pop_up[i])) * pop[i] + POP_ALPHA;
+                        pop_up[i] = pass_id;
+                    }
                     last_pass[i] = pass_id;
                     if (valid[i]) { n_hit++; continue; }
                     n_miss++;
@@ -604,6 +624,8 @@ static bool load_meta(const std::string &model_path) {
     }
     const size_t N = (size_t) g_ar.n_layer * g_ar.n_expert;
     g_ar.score.assign(N, 0.f);
+    g_ar.pop.assign(N, 0.f);
+    g_ar.pop_up.assign(N, 0);
     g_ar.valid.assign(N, 0);
     g_ar.inflight.assign(N, 0);
     g_ar.last_pass.assign(N, 0);
@@ -689,7 +711,11 @@ int main(int argc, char ** argv) {
         else if (a == "--delta") g_ar.delta = atoi(argv[++i]);
         else if (a == "--fetch") g_ar.fetch = atoi(argv[++i]);
         else if (a == "--decay") g_ar.decay = (float) atof(argv[++i]);
-        else if (a == "--policy") g_ar.lru = std::string(argv[++i]) != "lfu";
+        else if (a == "--policy") {
+            const std::string pol = argv[++i];
+            g_ar.lru = pol != "lfu";
+            g_ar.reuse = pol == "reuse";
+        }
         else if (a == "--bias") g_ar.bias_strength = (float) atof(argv[++i]);
         else if (a == "--ppl") g_ppl_file = argv[++i];
         else if (a == "--ppl-n") g_ppl_n = atoi(argv[++i]);
