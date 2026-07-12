@@ -254,6 +254,33 @@ What was learned (each iteration measured; see git history):
    llama.cpp reads via a custom buffer, plus the trained probe (+20 pp recall
    at long Δ) to make prefetch decisively better than LFU.
 
+### 13. Phase 2 v2 spike: the owned expert arena — 2.1–2.7× over the kernel
+
+`src/arena.cpp`. The route-(a) spike succeeded with a twist: instead of a custom
+ggml buffer type (whose eager loading defeats paging), the arena **replaces the
+expert tensors' page interiors in-place** (`mmap MAP_FIXED` anonymous over the
+model mapping — tensor pointers unchanged, llama.cpp unmodified). Experts are
+`pread` into their own addresses (parallel worker pool for demand misses and
+prefetch alike; the topk callback fires before the matmul, guaranteeing
+validity), evicted with `MADV_DONTNEED` (anonymous memory — no kernel fights).
+
+| GLM-4.5-Air Q2, 64-tok decode | kernel | pager v1 | **arena v2 spike** |
+|---|---|---|---|
+| 24 G envelope (~52% experts) | 1.23 | 1.63 | **2.61 tok/s (2.1×)** |
+| 16 G envelope (~28% experts) | 0.74 | 0.84 | **2.01 tok/s (2.7×)** |
+| prefill | 2.1–2.3 t/s | — | **3.9–4.3 t/s** |
+
+- The arena at 16 G beats the kernel at 24 G. Misses cost one expert-sized read,
+  not a fault storm; parallel demand loads (a layer's misses scatter across 6
+  workers) was worth +45% alone; eviction is free.
+- Output is token-identical to v1/kernel runs (same seed) — correctness holds.
+- Lessons: layer-window pinning (not whole-pass) or prefill blows the budget;
+  the never-executed MTP layer spans two mappings and stays kernel-paged.
+- Still on the table for v2 proper: io_uring + O_DIRECT (kill page-cache
+  double-buffering, exact QD), the trained linear probe (+20 pp recall at long
+  Δ), multi-shard GGUF (needed for GLM-5.2), and a VRAM hot-expert tier.
+  Achieved 2.7× of the measured 2.5–4.5× headroom with none of those yet.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
