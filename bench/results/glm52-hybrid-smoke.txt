@@ -1,0 +1,25 @@
+
+build      : b1-e3546c7
+model      : models/glm52-gguf/UD-Q2_K_XL/GLM-5.2-UD-Q2_K_XL-00001-of-00007.gguf
+ftype      : Q2_K - Medium
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+
+> The key idea of mixture-of-experts models is
+
+[Start thinking]
+
+1.  **Analyze the Request
+
+[ Prompt: 0.5 t/s | Generation: 0.3 t/s ]
+
+
+Exiting...

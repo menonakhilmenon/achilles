@@ -200,6 +200,26 @@ run so the scope faults its own pages), overflow paged from NVMe by the kernel:
 - Naive paging variance is severe (±33% at 32 GB) — deadline-scheduled prefetch
   should also flatten p99, not just the mean.
 
+### 11. GLM-5.2 (744B) actually runs on this desktop — the floors are measured
+
+First contact with the beast (UD-Q2_K_XL, 247 GB on a 64 GB / 16 GB-VRAM box):
+
+| config | result |
+|---|---|
+| CPU-only naive mmap | 16 tokens did NOT complete in ~5 h → **< 0.05 tok/s** (fault-serialized, QD≈1) |
+| **Three-tier naive** (dense in VRAM, experts in 44 GB `MemoryHigh` envelope ≈ 17% resident, SSD overflow) | **prefill 0.5 t/s, decode 0.3 tok/s**, coherent output (model began its reasoning preamble); 536 GiB of NVMe reads for a handful of tokens |
+| Managed-runtime projection (simulator + measured locality/predictor) | **~3.5–4 tok/s** — a 10–13× gap for Phase 2 to close |
+
+The model *works* end-to-end on the stack — quality intact, tiering functional —
+and the entire remaining problem is I/O discipline: expert-granular O_DIRECT reads
+instead of 4 KiB faults, decayed-LFU eviction instead of kernel LRU, and
+predictor-driven prefetch instead of readahead. Every one of those deltas is
+individually measured above.
+
+(Tooling note: current llama-cli ignores `-no-cnv` in favor of its new chat UI and
+spins printing prompts on closed stdin — use `llama-bench` or `--single-turn` for
+unattended runs.)
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
