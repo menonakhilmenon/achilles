@@ -181,9 +181,12 @@ Only after Phase 4 passes. Two additions, in order:
 
 - [ ] **GPU as accelerator tier** (ktransformers-style split, then beyond): dense
       skeleton (attention/MLA+DSA, shared experts, embeddings — ~10 GB @Q4) + KV cache +
-      hottest experts in 36 GB VRAM; CPU computes cold-but-in-RAM experts (Fiddler-style
+      hottest experts in VRAM; CPU computes cold-but-in-RAM experts (Fiddler-style
       — moving 24 KB of activations beats moving 20 MB of weights); SSD feeds RAM under
       predictor control. GPU also fixes prefill (compute-bound).
+      **De-risked early (2026-07-12)**: llama.cpp Vulkan on the RX 9070 XT already runs
+      this split — GLM-4.5-Air decode 2.3× (5.5→12.6 tok/s), prefill 2.8×; see
+      traces-analysis.md §9. Revised GLM-5.2-Q2 projection with hybrid: ~3.5–4 tok/s.
 - [ ] **GLM-5.2** @ Q2–Q4 experts (dense skeleton kept high-precision — it's only ~19B
       params): needs MLA + DSA (IndexShare) kernels — inventory engine support
       (llama.cpp/KTransformers/SGLang) at that time and build on the best one.

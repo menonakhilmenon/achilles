@@ -149,6 +149,31 @@ GLM-5.2-Q2 on 64 GB RAM** — at the plan's success threshold. Prefetch overshoo
 (m=16) is the current overhead to attack (adaptive m / dedupe against in-flight);
 doubling RAM moves the projection to ~3.5–4 tok/s (compute-bound).
 
+### 9. GPU hybrid measured (RX 9070 XT, Vulkan/RADV): the fast tier works today
+
+llama.cpp Vulkan build (`build-vk/`, brew-supplied glslc/headers on the immutable
+OS), `-ngl 99 -ot "exps=CPU"` = dense+attention+KV in VRAM, experts in RAM:
+
+| model | config | pp512 | tg128 |
+|---|---|---|---|
+| Qwen3-30B-A3B Q4 | CPU only | 168 | 23.8 |
+| | hybrid | **447 (2.7×)** | 24.8 (+4%) |
+| GLM-4.5-Air Q2 (110B) | CPU only | 21.3 | 5.5 |
+| | hybrid | **59.5 (2.8×)** | **12.6 (2.3×)** |
+
+- Prefill: ~3× everywhere (compute-bound, GPU wins as expected).
+- Decode: +4% on Qwen (experts dominate its bytes) but **2.3× on the GLM family**,
+  whose dense skeleton is heavy enough that evicting it from RAM to VRAM frees the
+  whole 55 GB/s for expert reads. GLM-5.2 has the same anatomy.
+- Revised GLM-5.2-Q2 projection with the hybrid split: RAM serves ~7.2 GB/token of
+  experts (~130 ms) with SSD misses overlapping inside it → **~3.5–4 tok/s**, up
+  from ~1.9 CPU-only. VRAM budget: Q2 dense ≈ 6 GB + KV + a hot-expert cache in the
+  remaining ~8 GB — the three-tier design (VRAM ← RAM ← SSD) is live on this box.
+- Practical notes: RDNA4 exposes KHR_coopmat matrix cores under RADV; `-ngl 0` on a
+  Vulkan build still opportunistically offloads prefill (not a CPU baseline); pin
+  the dGPU with `GGML_VK_VISIBLE_DEVICES=1` (the iGPU enumerates first with 33 GB
+  of GTT/host memory — itself interesting as a future pinned-staging path).
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
