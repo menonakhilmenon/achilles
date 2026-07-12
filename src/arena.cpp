@@ -96,6 +96,10 @@ struct arena {
     bool probe_mode = false;  // rw holds trained probes for (l -> l+delta); score only d==delta
     int probe_layers = 0;
     std::vector<float> probe_data;
+    int probe8_layers = 0;
+    std::vector<float> probe8_data;
+    std::vector<std::vector<float>> rw8;    // far-stage probes (l -> l+8)
+    std::vector<uint32_t> plan_hint;        // pass id when expert was last planned
 
     std::atomic<uint64_t> n_prefetch{0}, n_evict{0}, n_hit{0}, n_miss{0}, n_demand{0}, n_uring{0}, n_fallback{0};
 
@@ -166,7 +170,11 @@ struct arena {
                     const int i = idx(l, e);
                     if (!valid[i] || inflight[i]) continue;
                     if (last_pass[i] == pass_id && l >= cur_layer - 1) continue;
-                    if (score[i] < best) { best = score[i]; bl = l; be = e; }
+                    float sc2 = score[i];
+                    if (!plan_hint.empty() && plan_hint[i] == pass_id && l > cur_layer) {
+                        sc2 += 1e12f; // planned for the rest of this token: evict last
+                    }
+                    if (sc2 < best) { best = sc2; bl = l; be = e; }
                 }
             }
             if (bl < 0) break;
@@ -323,11 +331,21 @@ struct arena {
     }
 
     void score_hidden(int l, const float *h) {
-        {
-            const int d_lo = probe_mode ? delta : ((l <= 1) ? 1 : delta);
-            for (int d = d_lo; d <= delta && l + d < n_layer; d++) {
+        // stages: near (delta, d3 probes or gate-ahead) + far (8, d8 probes)
+        struct stage { int d; const std::vector<float> * W; };
+        stage stages[2];
+        int n_stages = 0;
+        if (probe_mode || !rw.empty()) stages[n_stages++] = {delta, nullptr};
+        if (!rw8.empty() && l < (int) rw8.size() && !rw8[l].empty()) {
+            stages[n_stages++] = {8, &rw8[l]};
+        }
+        for (int si = 0; si < n_stages; si++) {
+            const int d_lo = (si > 0 || probe_mode) ? stages[si].d
+                                                    : ((l <= 1) ? 1 : stages[si].d);
+            for (int d = d_lo; d <= stages[si].d && l + d < n_layer; d++) {
                 if (!pageable[l + d]) continue;
-                const auto &W = probe_mode ? rw[l] : rw[l + d];
+                const auto &W = stages[si].W ? *stages[si].W
+                              : (probe_mode ? rw[l] : rw[l + d]);
                 if (W.empty()) continue;
                 std::vector<std::pair<float, int>> sc(n_expert);
                 for (int e = 0; e < n_expert; e++) {
@@ -340,8 +358,15 @@ struct arena {
                     }
                     sc[e] = {dot, e};
                 }
-                std::partial_sort(sc.begin(), sc.begin() + fetch, sc.end(),
+                const int m = std::min(fetch * 2, n_expert); // plan top-2m, fetch top-m
+                std::partial_sort(sc.begin(), sc.begin() + m, sc.end(),
                                   [](auto &a, auto &b) { return a.first > b.first; });
+                {
+                    std::lock_guard<std::mutex> lk(mu);
+                    for (int i = 0; i < m; i++) {
+                        plan_hint[idx(l + d, sc[i].second)] = pass_id; // evictor: hands off
+                    }
+                }
                 for (int i = 0; i < fetch; i++) enqueue(l + d, sc[i].second, d);
             }
         }
@@ -548,6 +573,7 @@ static bool load_meta(const std::string &model_path) {
     g_ar.valid.assign(N, 0);
     g_ar.inflight.assign(N, 0);
     g_ar.last_pass.assign(N, 0);
+    g_ar.plan_hint.assign(N, 0);
     size_t total = 0;
     int moe_layers = 0;
     for (int l = 0; l < g_ar.n_layer; l++) {
@@ -622,6 +648,22 @@ int main(int argc, char ** argv) {
         else if (a == "--bias") g_ar.bias_strength = (float) atof(argv[++i]);
         else if (a == "--ppl") g_ppl_file = argv[++i];
         else if (a == "--ppl-n") g_ppl_n = atoi(argv[++i]);
+        else if (a == "--probe-d8") {
+            FILE * pf = fopen(argv[++i], "rb");
+            if (pf) {
+                int32_t nl, ne, nh;
+                if (fread(&nl, 4, 1, pf) == 1 && fread(&ne, 4, 1, pf) == 1 &&
+                    fread(&nh, 4, 1, pf) == 1) {
+                    g_ar.probe8_layers = nl;
+                    g_ar.probe8_data.assign((size_t) nl * ne * nh, 0.f);
+                    if (fread(g_ar.probe8_data.data(), 4, g_ar.probe8_data.size(), pf)
+                        != g_ar.probe8_data.size()) {
+                        g_ar.probe8_data.clear();
+                    }
+                }
+                fclose(pf);
+            }
+        }
         else if (a == "--spec") g_spec = atoi(argv[++i]);
         else if (a == "--dump") g_dump = fopen(argv[++i], "wb");
         else if (a == "--probe") {
@@ -667,6 +709,20 @@ int main(int argc, char ** argv) {
             for (int l = g_ar.probe_layers; l < g_ar.n_layer; l++) g_ar.rw[l].clear();
             g_ar.probe_data.clear();
             LOG_INF("arena: trained probes applied to %d layers (delta=%d)\n", applied, g_ar.delta);
+        }
+        if (!g_ar.probe8_data.empty()) {
+            const size_t per = (size_t) g_ar.n_expert * g_ar.n_embd;
+            g_ar.rw8.assign(g_ar.n_layer, {});
+            int applied8 = 0;
+            for (int l = 0; l < std::min(g_ar.probe8_layers, g_ar.n_layer); l++) {
+                std::vector<float> w(g_ar.probe8_data.begin() + l * per,
+                                     g_ar.probe8_data.begin() + (l + 1) * per);
+                bool nonzero = false;
+                for (size_t j = 0; j < per && !nonzero; j += 997) nonzero = w[j] != 0.f;
+                if (nonzero) { g_ar.rw8[l] = std::move(w); applied8++; }
+            }
+            g_ar.probe8_data.clear();
+            LOG_INF("arena: far-stage d8 probes applied to %d layers\n", applied8);
         }
         g_ar.budget = (size_t) (budget_gib * (1 << 30));
         params.cb_eval = cb_arena;

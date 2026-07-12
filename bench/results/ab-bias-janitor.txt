@@ -1,7 +1,7 @@
---- bias=0 ---
-ACHILLES decode:  48 tok in 63.4s = 0.757 tok/s
-ACHILLES arena: prefetch=14421 demand=17605 evict=29045 hit=17485 miss=24939 (hit rate 0.412)
---- bias=0 ---
-ACHILLES decode:  48 tok in 64.9s = 0.740 tok/s
-ACHILLES arena: prefetch=14418 demand=17608 evict=29045 hit=17484 miss=24940 (hit rate 0.412)
-AB_DONE
+--- bias=plain ---
+ACHILLES decode:  48 tok in 57.7s = 0.832 tok/s
+ACHILLES arena: prefetch=14436 demand=11538 evict=22993 hit=23556 miss=18868 (hit rate 0.555)
+--- bias=plain ---
+ACHILLES decode:  48 tok in 53.4s = 0.900 tok/s
+ACHILLES arena: prefetch=14435 demand=11542 evict=22996 hit=23558 miss=18866 (hit rate 0.555)
+--- bias=plain ---
