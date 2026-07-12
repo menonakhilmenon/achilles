@@ -348,6 +348,7 @@ static arena g_ar;
 static bool g_on = true;
 static std::string g_ppl_file;
 static int g_ppl_n = 600;
+static int g_spec = 0;  // n-gram lookup speculation depth (0 = off)
 static FILE * g_dump = nullptr;  // trace dump: 'H' l n h[fp32*n] | 'T' l k ids[i32*k]
 static std::mutex g_dump_mu;
 static int g_workers = 6;
@@ -590,6 +591,7 @@ int main(int argc, char ** argv) {
         else if (a == "--bias") g_ar.bias_strength = (float) atof(argv[++i]);
         else if (a == "--ppl") g_ppl_file = argv[++i];
         else if (a == "--ppl-n") g_ppl_n = atoi(argv[++i]);
+        else if (a == "--spec") g_spec = atoi(argv[++i]);
         else if (a == "--dump") g_dump = fopen(argv[++i], "wb");
         else if (a == "--probe") {
             FILE * pf = fopen(argv[++i], "rb");
@@ -712,14 +714,77 @@ int main(int argc, char ** argv) {
     std::string text;
     const int n_gen = params.n_predict > 0 ? params.n_predict : 64;
     int gen = 0;
+    // n-gram lookup speculation: draft the continuation of a previously seen
+    // n-gram, decode t0+draft as ONE batch (expert loads amortize across the
+    // batch), accept the longest prefix the sampler agrees with, rewind KV.
+    std::vector<llama_token> hist = toks;
+    auto ngram_draft = [&](int depth) {
+        std::vector<llama_token> d;
+        for (int n = 3; n >= 2 && d.empty(); n--) {
+            if ((int) hist.size() < n + 1) continue;
+            for (int i = (int) hist.size() - n - 1; i >= 0; i--) {
+                bool match = true;
+                for (int j = 0; j < n; j++) {
+                    if (hist[i + j] != hist[hist.size() - n + j]) { match = false; break; }
+                }
+                if (match) {
+                    for (int j = 0; j < depth && i + n + j < (int) hist.size(); j++) {
+                        d.push_back(hist[i + n + j]);
+                    }
+                    break;
+                }
+            }
+        }
+        return d;
+    };
+    llama_memory_t mem = llama_get_memory(lctx);
+    llama_pos n_past = (llama_pos) toks.size();
+    llama_batch sb = llama_batch_init(g_spec + 1, 0, 1);
+    bool have_pending = false;
+    llama_token pending = 0;
+    uint64_t n_spec_acc = 0, n_spec_try = 0;
     const double t_g0 = ggml_time_us() / 1e6;
-    for (; gen < n_gen; gen++) {
-        llama_token tok = llama_sampler_sample(smpl, lctx, -1);
-        if (llama_vocab_is_eog(vocab, tok)) break;
-        text += common_token_to_piece(lctx, tok);
-        if (llama_decode(lctx, llama_batch_get_one(&tok, 1))) break;
+    while (gen < n_gen) {
+        llama_token t0 = have_pending ? pending : llama_sampler_sample(smpl, lctx, -1);
+        have_pending = false;
+        if (llama_vocab_is_eog(vocab, t0)) break;
+        text += common_token_to_piece(lctx, t0);
+        hist.push_back(t0);
+        gen++;
+        std::vector<llama_token> draft = g_spec > 0 ? ngram_draft(g_spec) : std::vector<llama_token>{};
+        sb.n_tokens = 1 + (int) draft.size();
+        sb.token[0] = t0; sb.pos[0] = n_past; sb.n_seq_id[0] = 1; sb.seq_id[0][0] = 0;
+        sb.logits[0] = true;
+        for (size_t i = 0; i < draft.size(); i++) {
+            sb.token[i + 1] = draft[i]; sb.pos[i + 1] = n_past + 1 + (llama_pos) i;
+            sb.n_seq_id[i + 1] = 1; sb.seq_id[i + 1][0] = 0; sb.logits[i + 1] = true;
+        }
+        if (llama_decode(lctx, sb)) break;
+        int n_acc = 0;
+        for (size_t i = 0; i <= draft.size() && gen < n_gen; i++) {
+            llama_token t = llama_sampler_sample(smpl, lctx, (int) i);
+            if (i < draft.size()) n_spec_try++;
+            if (i < draft.size() && t == draft[i] && !llama_vocab_is_eog(vocab, t)) {
+                text += common_token_to_piece(lctx, t);
+                hist.push_back(t);
+                gen++; n_acc++; n_spec_acc++;
+            } else {
+                pending = t;
+                have_pending = true;
+                break;
+            }
+        }
+        if ((int) draft.size() > n_acc) {
+            llama_memory_seq_rm(mem, 0, n_past + 1 + n_acc, -1);
+        }
+        n_past += 1 + n_acc;
     }
     const double t_g1 = ggml_time_us() / 1e6;
+    llama_batch_free(sb);
+    if (g_spec > 0) {
+        fprintf(stderr, "ACHILLES spec: tried=%" PRIu64 " accepted=%" PRIu64 " (%.0f%%)\n",
+                n_spec_try, n_spec_acc, n_spec_try ? 100.0 * n_spec_acc / n_spec_try : 0.0);
+    }
 
     g_ar.stop = true;
     g_ar.cv.notify_all();
