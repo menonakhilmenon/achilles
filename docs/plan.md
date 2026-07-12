@@ -218,10 +218,55 @@ paging.
 - Write-up: blog post at minimum; plausibly a systems paper (research.md §3 positioning:
   nobody has shown a 744B model at usable speed on this class of hardware).
 
-## Immediate next steps
+## Optimization roadmap — consolidated 2026-07-12
 
-1. Phase 0 microbenchmarks (RAM bandwidth, SSD throughput at expert granularity).
-2. Phase 1 tracing on Qwen3-30B-A3B (~18 GB Q4 — fits the RAM budget with room to spare).
+Where the tok/s came from (GLM-5.2 UD-Q2_K_XL decode, full profile):
+
+| Optimization | Effect |
+|---|---|
+| naive kernel paging (mmap baseline) | 0.30 |
+| arena v2: MAP_FIXED + demand paging + io_uring workers | 0.75 |
+| + within-token rolling plan → **plan-aware eviction** | **0.83–0.94** (+40%, biggest software win) |
+| trained probes (d3 recall .57, d8 .52) feeding the plan | folded into the above |
+| SSD airflow fix (3.9 → 7.3 GB/s sustained) | cheapest 2× in the project |
+| n-gram speculation (38% draft acceptance) | works; not yet measured combined with the final eviction config |
+
+Stability work that makes the numbers reproducible (not speed per se): eviction
+janitor + backpressure, load-phase page-cache janitor, TTM page-pool kernel
+args, MemAvailable preflight, POLITE/FULL run profiles.
+
+Parked / dead ends (don't revisit without new evidence):
+- **Cache-aware routing bias** — built, quality-cleared at ≤3% logprob, parked
+  by owner preference for zero quality perturbation.
+- **Cross-token prediction** — dead on GLM-5.2 (26% reuse ceiling; probes worse
+  than the ceiling). Within-token rolling plan is the viable form.
+- **Async scorer thread** — 28% slower than inline scoring; inline restored.
+- **Prefill layer-streaming** — built but disabled (`--pstream 0`): post-TTM-fix
+  run showed 0↔12G oscillating residency and a crawling prefill. Undiagnosed.
+
+Remaining backlog, ranked by expected payoff ÷ effort:
+
+1. **Prefill thrash diagnosis** (task #19) — debug on Qwen3-30B (13× smaller,
+   zero desktop impact). Prefill is the worst user-visible latency today;
+   layer-streaming was supposed to fix it and currently can't be enabled.
+2. **Learned reuse-distance evictor** — LRU hits .609 vs Belady .798 at 19%
+   residency: a 19pp hit-rate gap, and hit rate is the direct tok/s lever.
+   Train a small reuse-distance head on the same dump streams as the probes.
+3. **Expert-major shadow repack** — offline tool rewrites experts contiguously
+   (gate/up/down co-located per expert) into a shadow file; the arena's range
+   table just points there. Fewer, larger, aligned reads: +20–40% effective
+   SSD bandwidth for ~a day of work. Costs ~220 GB extra disk (budget allows).
+4. **Speculation × plan integration** — n-gram drafts give multi-token
+   lookahead; batch-verify already routes future tokens, so their topk can
+   extend the rolling plan across tokens — the only form of cross-token
+   prediction that survived Phase 1. Also re-measure spec ON with plan-aware
+   eviction (never benchmarked together).
+5. **Combined clean re-measure** (FULL profile, owner away): decode triple +
+   prefill A/B with everything on — establishes the honest headline number.
+6. **Hardware**: Gen5 SSD (~12–14 GB/s → projected 2.5–3.5 tok/s); later
+   two-drive striping. Pure money-for-bytes, no code risk.
+7. **MacBook/Metal port** — separate track (see recalibration below); target
+   is Air-class, not the beast.
 
 ## Resolved / open questions
 
