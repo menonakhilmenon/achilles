@@ -502,6 +502,12 @@ static bool cb_arena(struct ggml_tensor * t, bool ask, void *) {
             int32_t hdr[2] = {l, k};
             fwrite(hdr, 4, 2, g_dump);
             fwrite(ids.data(), 4, k, g_dump);
+        } else if (g_dump && n_tokens > 1) {  // prefill routing: 'P' l n ids
+            std::lock_guard<std::mutex> lk(g_dump_mu);
+            fputc('P', g_dump);
+            int32_t hdr[2] = {l, k * n_tokens};
+            fwrite(hdr, 4, 2, g_dump);
+            fwrite(ids.data(), 4, (size_t) k * n_tokens, g_dump);
         }
         g_ar.on_topk(l, ids.data(), k, n_tokens);
     } else if (is_norm && ggml_nrows(t) == 1 && t->type == GGML_TYPE_F32) {

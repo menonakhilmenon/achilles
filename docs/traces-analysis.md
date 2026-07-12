@@ -478,6 +478,35 @@ Signature in both models: ~equal hit rate but **7–13% fewer prefetches and
 to be re-fetched. Needs ~50+ tokens to warm up (α=0.02). Now the default in
 bench/staged_run.sh.
 
+### 20. Prompt-conditioned working-set prediction: real structure, bounded payoff
+
+Owner's idea: a tiny NN predicting future expert usage from the prompt.
+Validated on 20 diverse-domain prompt traces (Qwen, 192-tok decodes,
+scripts/promptset_analysis.py; traces/qwen-prompts/ keeps hidden states as
+future training inputs).
+
+**The structure is real.** Decode usage cosine: 0.315 across prompts vs 0.854
+within a prompt (split-half). Working sets are strongly prompt-specific — and
+per §17, per-token *order* is unpredictable, so the aggregate working set is
+the right target.
+
+**But eviction converts little of it.** Hit-rate ladder (2nd-half, 25% cap):
+LRU .824 → deployed reuse policy .844 → +global prior .841 (nothing — the
+online EWMA already learns it) → **+oracle prompt prior .861**. A PERFECT
+predictor is worth +1.6 pp ≈ +4–6% decode; a real NN, likely half that.
+The online EWMA converges to the prompt's distribution within ~50 tokens, so
+a prior mostly buys the early window plus lag correction.
+
+**Free-prior variant also tested**: the prefill sweep's own routing histogram
+(zero parameters, available in the callback). It correlates with decode usage
+at 0.747 — yet adds ~0 pp in the sim (short prompts → noisy counts; the EWMA
+catches up too fast for the prior to matter).
+
+**Disposition: PARKED.** The idea is validated as real-but-bounded; the same
+future-knowledge gap is attacked ~10× harder by speculation×plan lookahead
+(verified multi-token routing, 17 pp Belady headroom). Revisit if long-prompt
+workloads (where the prefill histogram is high-quality) become the norm.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity

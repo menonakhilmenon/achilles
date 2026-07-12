@@ -1,0 +1,20 @@
+Write a Python function that parses a CSV file and computes per-column statistics, handling malformed rows gracefully.
+Implement a lock-free multi-producer single-consumer ring buffer in C++ with memory ordering annotations explained.
+Prove that the square root of 2 is irrational, then explain how the proof generalizes to other non-perfect squares.
+Write a sonnet about the last lighthouse keeper on an automated coast.
+Tell a short story about a cartographer who discovers her maps change the places they depict.
+Give a detailed recipe for a three-course Keralan dinner, with timing and preparation order.
+Explain the difference between negligence and strict liability in tort law, with illustrative cases.
+Describe the pathophysiology of type 2 diabetes and how metformin addresses it.
+Explain the causes and consequences of the fall of Constantinople in 1453.
+Explique en français pourquoi la tour Eiffel était controversée lors de sa construction, puis décrivez sa réception aujourd'hui.
+Design a JSON schema for a library lending system and show three example documents that validate against it.
+Write a SQL query with window functions that finds the top three products by revenue growth in each region, and explain it.
+Write a bash script that watches a directory and syncs changed files to a remote host with retries and logging.
+Explain how gravitational lensing works and what it tells us about dark matter distribution.
+Describe how CRISPR-Cas9 achieves targeted gene editing and its main off-target risks.
+Explain the mechanics of a collateralized debt obligation and its role in the 2008 crisis.
+Analyze the Sicilian Defense Najdorf variation: main ideas for both sides and typical pawn structures.
+Explain the circle of fifths and how it guides chord progressions in popular music.
+Plan a two-week overland journey from Istanbul to Tbilisi with daily stops and cultural highlights.
+Compare utilitarianism and deontology on the trolley problem, then defend which handles moral luck better.
