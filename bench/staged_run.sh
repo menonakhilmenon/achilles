@@ -15,10 +15,10 @@ if [ "$AVAIL" -lt 48 ]; then
 fi
 systemctl --user reset-failed $UNIT.service 2>/dev/null
 rm -f /tmp/claude-1000/gate
-systemd-run --user --unit $UNIT -p WorkingDirectory=/var/home/akhil/achilles -p MemoryHigh=24G -p MemoryMax=50G -p MemorySwapMax=2G \
+systemd-run --user --unit $UNIT -p WorkingDirectory=/var/home/akhil/achilles -p MemoryHigh=44G -p MemoryMax=48G -p MemorySwapMax=2G \
   bash -c "GGML_VK_VISIBLE_DEVICES=1 exec /var/home/akhil/achilles/src/achilles-arena -m '$M' \
     -p 'Explain how mixture-of-experts language models work, covering routing, expert specialization, and why sparsity helps.' \
-    -n 24 -t 10 -ngl 99 -ot exps=CPU --budget-gib 36 --workers 6 --no-uring --gate /tmp/claude-1000/gate --stats > $LOG 2>&1"
+    -n 24 -t 10 -ngl 99 -ot exps=CPU --budget-gib 30 --workers 6 --no-uring --gate /tmp/claude-1000/gate --stats > $LOG 2>&1"
 
 # wait for the arena install marker, then raise the ceiling for decode
 for i in $(seq 1 120); do
@@ -27,13 +27,8 @@ for i in $(seq 1 120); do
   sleep 2
 done
 CG=$(systemctl --user show $UNIT.service -p ControlGroup --value)
-if grep -q "replaced" $LOG 2>/dev/null; then
-  systemctl --user set-property --runtime $UNIT.service MemoryHigh=47G
-  echo $((47*1024*1024*1024)) > /sys/fs/cgroup$CG/memory.high 2>/dev/null
-  sleep 1
-  echo "STAGED: memory.high now $(cat /sys/fs/cgroup$CG/memory.high 2>/dev/null)"
-  touch /tmp/claude-1000/gate
-fi
+touch /tmp/claude-1000/gate   # single flat ceiling; no staging needed
+echo "flat ceiling: memory.high=$(cat /sys/fs/cgroup$CG/memory.high 2>/dev/null)"
 ( while systemctl --user is-active --quiet $UNIT.service; do
     echo "high=$(cat /sys/fs/cgroup$CG/memory.high 2>/dev/null) cur=$(( $(cat /sys/fs/cgroup$CG/memory.current 2>/dev/null || echo 0) / 2**30 ))G"
     sleep 5
