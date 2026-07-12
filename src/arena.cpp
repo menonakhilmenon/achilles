@@ -86,6 +86,9 @@ struct arena {
     std::thread scorer;
     int delta = 3, fetch = 10;
     float decay = 0.98f;
+    bool probe_mode = false;  // rw holds trained probes for (l -> l+delta); score only d==delta
+    int probe_layers = 0;
+    std::vector<float> probe_data;
 
     std::atomic<uint64_t> n_prefetch{0}, n_evict{0}, n_hit{0}, n_miss{0}, n_demand{0}, n_uring{0}, n_fallback{0};
 
@@ -286,16 +289,17 @@ struct arena {
 
     void score_hidden(int l, const float *h) {
         {
-            const int d_lo = (l <= 1) ? 1 : delta;
+            const int d_lo = probe_mode ? delta : ((l <= 1) ? 1 : delta);
             for (int d = d_lo; d <= delta && l + d < n_layer; d++) {
-                if (!pageable[l + d] || rw[l + d].empty()) continue;
-                const auto &W = rw[l + d];
+                if (!pageable[l + d]) continue;
+                const auto &W = probe_mode ? rw[l] : rw[l + d];
+                if (W.empty()) continue;
                 std::vector<std::pair<float, int>> sc(n_expert);
                 for (int e = 0; e < n_expert; e++) {
                     float dot = 0;
                     const float *w = &W[(size_t) e * n_embd];
                     for (int j = 0; j < n_embd; j++) dot += w[j] * h[j];
-                    if (sigmoid_bias) {
+                    if (!probe_mode && sigmoid_bias) {
                         dot = 1.0f / (1.0f + expf(-dot));
                         if (!rb[l + d].empty()) dot += rb[l + d][e];
                     }
@@ -338,6 +342,8 @@ struct arena {
 
 static arena g_ar;
 static bool g_on = true;
+static FILE * g_dump = nullptr;  // trace dump: 'H' l n h[fp32*n] | 'T' l k ids[i32*k]
+static std::mutex g_dump_mu;
 static int g_workers = 6;
 
 static bool cb_arena(struct ggml_tensor * t, bool ask, void *) {
@@ -354,12 +360,26 @@ static bool cb_arena(struct ggml_tensor * t, bool ask, void *) {
         for (int j = 0; j < n_tokens; j++) {
             ggml_backend_tensor_get(t, ids.data() + (size_t) j * k, j * t->nb[1], k * sizeof(int32_t));
         }
+        if (g_dump && n_tokens == 1) {
+            std::lock_guard<std::mutex> lk(g_dump_mu);
+            fputc('T', g_dump);
+            int32_t hdr[2] = {l, k};
+            fwrite(hdr, 4, 2, g_dump);
+            fwrite(ids.data(), 4, k, g_dump);
+        }
         g_ar.on_topk(l, ids.data(), k, n_tokens);
     } else if (is_norm && t->ne[1] == 1 && t->type == GGML_TYPE_F32) {
         const int l = atoi(strchr(t->name, '-') + 1);
         static std::vector<float> h;
         h.resize(t->ne[0]);
         ggml_backend_tensor_get(t, h.data(), 0, t->ne[0] * sizeof(float));
+        if (g_dump) {
+            std::lock_guard<std::mutex> lk(g_dump_mu);
+            fputc('H', g_dump);
+            int32_t hdr[2] = {l, (int32_t) t->ne[0]};
+            fwrite(hdr, 4, 2, g_dump);
+            fwrite(h.data(), 4, t->ne[0], g_dump);
+        }
         g_ar.submit_hidden(l, h.data(), (int) t->ne[0]);
     }
     return true;
@@ -536,6 +556,23 @@ int main(int argc, char ** argv) {
         else if (a == "--delta") g_ar.delta = atoi(argv[++i]);
         else if (a == "--fetch") g_ar.fetch = atoi(argv[++i]);
         else if (a == "--decay") g_ar.decay = (float) atof(argv[++i]);
+        else if (a == "--dump") g_dump = fopen(argv[++i], "wb");
+        else if (a == "--probe") {
+            FILE * pf = fopen(argv[++i], "rb");
+            if (pf) {
+                int32_t nl, ne, nh;
+                if (fread(&nl, 4, 1, pf) == 1 && fread(&ne, 4, 1, pf) == 1 &&
+                    fread(&nh, 4, 1, pf) == 1) {
+                    g_ar.probe_layers = nl;
+                    g_ar.probe_data.assign((size_t) nl * ne * nh, 0.f);
+                    if (fread(g_ar.probe_data.data(), 4, g_ar.probe_data.size(), pf)
+                        == g_ar.probe_data.size()) {
+                        g_ar.probe_mode = true;
+                    }
+                }
+                fclose(pf);
+            }
+        }
         else if (a == "--workers") g_workers = atoi(argv[++i]);
         else if (a == "--no-pager") g_on = false;
         else if (a == "--stats") stats = true;
@@ -549,6 +586,21 @@ int main(int argc, char ** argv) {
 
     if (g_on) {
         if (!load_meta(params.model.path)) return 1;
+        if (g_ar.probe_mode) {  // trained probes replace router weights for scoring
+            const size_t per = (size_t) g_ar.n_expert * g_ar.n_embd;
+            int applied = 0;
+            for (int l = 0; l < std::min(g_ar.probe_layers, g_ar.n_layer); l++) {
+                std::vector<float> w(g_ar.probe_data.begin() + l * per,
+                                     g_ar.probe_data.begin() + (l + 1) * per);
+                bool nonzero = false;
+                for (size_t j = 0; j < per && !nonzero; j += 997) nonzero = w[j] != 0.f;
+                if (nonzero) { g_ar.rw[l] = std::move(w); applied++; }
+                else g_ar.rw[l].clear(); // no probe -> no gate-ahead from this layer
+            }
+            for (int l = g_ar.probe_layers; l < g_ar.n_layer; l++) g_ar.rw[l].clear();
+            g_ar.probe_data.clear();
+            LOG_INF("arena: trained probes applied to %d layers (delta=%d)\n", applied, g_ar.delta);
+        }
         g_ar.budget = (size_t) (budget_gib * (1 << 30));
         params.cb_eval = cb_arena;
         params.warmup = false;
