@@ -246,6 +246,11 @@ Parked / dead ends (don't revisit without new evidence):
 
 Remaining backlog, ranked by expected payoff ÷ effort:
 
+0. ~~**Stall packing / overlap**~~ — **CLOSED 2026-07-13** (§25): decode is
+   latency-floor-bound at ~1.1–1.2 (76 sync NVMe rounds/token; compression
+   needs prediction recall that doesn't exist). Prefill ubatch scaling paid
+   instead: 9.5 → 22.4 tok/s (-ub 2048 default). Decode gains from here are
+   hardware or headless budget.
 1. ~~**Prefill thrash diagnosis** (task #19)~~ — **RESOLVED 2026-07-12** (§18 of
    traces-analysis.md): the "thrash" was a long-prompt crash bug in the eval
    callback (zero-row output slice on non-final ubatches), pstream-independent.

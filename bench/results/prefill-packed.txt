@@ -1,0 +1,7 @@
+--- ub512 ---
+ACHILLES prefill: 2697 tok in 283.3s = 9.52 tok/s
+ACHILLES decode:  8 tok in 8.3s = 0.958 tok/s
+--- ub1024 ---
+ACHILLES prefill: 2697 tok in 162.6s = 16.59 tok/s
+ACHILLES decode:  8 tok in 8.8s = 0.908 tok/s
+DONE

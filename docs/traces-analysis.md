@@ -622,6 +622,30 @@ conditions**: hit rate ≥ ~85% (bytes stop binding), Gen5-class SSD, or
 RAM-rich boxes where verify batches amortize RAM bandwidth instead of SSD.
 Known issue: --spec-pmin ≥ 0.8 core-dumps (untriaged; irrelevant while parked).
 
+### 25. Stall packing: decode hits its latency floor; prefill jumps 2.3×
+
+(A) demand-reserved workers + (B) batched io_uring submission (4 experts/
+submit, QD 6→24 experts) landed with token-identical output and **halved
+worker IO time (125 s → 58 s per 64 tokens; per-stream 1.73 → 3.76 GB/s)** —
+and decode wall time did not move (1.084 vs 1.099). Decode stall is
+**latency-bound, not throughput-bound**: ~3 misses/layer × 76 layers = 76
+synchronous NVMe round-trips per token, and rounds can't be compressed
+without earlier discovery — which is the prediction-recall ceiling measured
+dead three times (§17, §20, §24). **Measured software floor for decode at
+hit .63 / Gen4: ~1.1–1.2 tok/s.** Remaining decode gains are hardware
+(Gen5 halves both bytes AND round-trip cost) or budget (headless +8–10%).
+
+The same packing pays where throughput binds: **prefill ubatch scaling**.
+Each ubatch sweeps the full expert store; fewer, larger ubatches:
+
+| -ub | prefill (2697-tok prompt) |
+|---|---|
+| 512 (old default) | 9.52 tok/s |
+| 1024 | 16.59 (+71%) |
+| **2048 (new default)** | **22.40 (+131%; ~45× naive)** |
+
+GTT held throughout (pages_limit fix); envelope swap-0 clean.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity

@@ -234,20 +234,27 @@ struct arena {
         }
     }
 
-    void worker() {
+    // Stall packing (2026-07-13): (A) the first g_demand_reserve workers only
+    // take demand loads, so a blocked layer never waits behind an in-flight
+    // speculative expert; (B) workers pop up to WORKER_BATCH experts per ring
+    // submission - deeper NVMe queue, fewer submit/wait round trips. The
+    // validity invariant is unchanged: an expert flips valid only after every
+    // one of its ranges completed.
+    static constexpr int WORKER_BATCH = 4;
+
+    void worker(bool demand_only) {
         io_uring ring;
-        io_uring * pring = (!g_no_uring && io_uring_queue_init(16, &ring, 0) == 0) ? &ring : nullptr;
+        io_uring * pring = (!g_no_uring && io_uring_queue_init(64, &ring, 0) == 0) ? &ring : nullptr;
+        req batch[WORKER_BATCH];
         while (!stop) {
-            req r;
+            int nb = 0;
             {
                 std::unique_lock<std::mutex> lk(mu);
-                cv.wait(lk, [&] { return stop.load() || !q.empty(); });
+                cv.wait(lk, [&] {
+                    return stop.load() ||
+                           (!q.empty() && (!demand_only || q.front().prio == 0));
+                });
                 if (stop) break;
-                std::pop_heap(q.begin(), q.end(), [](const req &a, const req &b) { return a.prio > b.prio; });
-                r = q.back();
-                q.pop_back();
-                const int i = idx(r.layer, r.expert);
-                if (valid[i] || inflight[i]) continue;
                 // backpressure: real footprint = resident + not-yet-dropped;
                 // never let it run more than 2 GiB past budget (was the source
                 // of 17-27 GB zram storms during prefill eviction bursts)
@@ -257,27 +264,106 @@ struct arena {
                 });
                 if (stop) break;
                 jcv.notify_one();
-                inflight[i] = 1;
-            }
-            do_load(r.layer, r.expert, pring);
-            {
-                std::lock_guard<std::mutex> lk(mu);
-                const int i = idx(r.layer, r.expert);
-                inflight[i] = 0;
-                valid[i] = 1;
-                score[i] = std::max(score[i], 1.5f);
-                if (reuse) {  // fresh prefetch: grace period against instant eviction
-                    pop[i] = std::max(pop[i], POP_ALPHA);
-                    pop_up[i] = pass_id;
-                    last_pass[i] = pass_id;
+                while (nb < WORKER_BATCH && !q.empty() &&
+                       (!demand_only || q.front().prio == 0) &&
+                       (nb == 0 || q.front().prio == batch[0].prio)) {
+                    std::pop_heap(q.begin(), q.end(), [](const req &a, const req &b) { return a.prio > b.prio; });
+                    req r = q.back();
+                    q.pop_back();
+                    const int i = idx(r.layer, r.expert);
+                    if (valid[i] || inflight[i]) continue;
+                    inflight[i] = 1;
+                    batch[nb++] = r;
                 }
-                resident_bytes += bytes_of[r.layer];
-                evict_to_budget_locked();
             }
+            if (nb == 0) continue;
+            do_load_batch(batch, nb, pring);
             jcv.notify_one();
-            if (r.prio == 0) n_demand++; else n_prefetch++;
         }
         if (pring) io_uring_queue_exit(pring);
+    }
+
+    // completion bookkeeping shared by both IO paths
+    void complete_expert(const req & r) {
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            const int i = idx(r.layer, r.expert);
+            inflight[i] = 0;
+            valid[i] = 1;
+            score[i] = std::max(score[i], 1.5f);
+            if (reuse) {  // fresh prefetch: grace period against instant eviction
+                pop[i] = std::max(pop[i], POP_ALPHA);
+                pop_up[i] = pass_id;
+                last_pass[i] = pass_id;
+            }
+            resident_bytes += bytes_of[r.layer];
+            evict_to_budget_locked();
+        }
+        cv.notify_all();
+        if (r.prio == 0) n_demand++; else n_prefetch++;
+    }
+
+    struct sqe_tag { const load_range * r; int req_idx; };
+
+    void do_load_batch(const req * batch, int nb, io_uring * ring) {
+        if (!ring) {
+            for (int b = 0; b < nb; b++) {
+                for (const auto & rg : ranges[batch[b].layer][batch[b].expert]) {
+                    if (rg.addr && rg.len) load_buffered(rg);
+                }
+                complete_expert(batch[b]);
+            }
+            return;
+        }
+        sqe_tag tags[WORKER_BATCH * 8];
+        int pending[WORKER_BATCH] = {0};
+        int n_tags = 0, submitted = 0;
+        for (int b = 0; b < nb; b++) {
+            for (const auto & rg : ranges[batch[b].layer][batch[b].expert]) {
+                if (!rg.addr || rg.len == 0) continue;
+                if (fds_direct[rg.file] < 0 || n_tags >= WORKER_BATCH * 8) {
+                    load_buffered(rg);
+                    continue;
+                }
+                const off_t  a_off = rg.foff & ~(off_t) 4095;
+                const size_t head  = (size_t) (rg.foff - a_off);
+                const size_t a_len = (rg.len + head + 4095) & ~(size_t) 4095;
+                io_uring_sqe * sqe = io_uring_get_sqe(ring);
+                if (!sqe) { load_buffered(rg); continue; }
+                tags[n_tags] = {&rg, b};
+                io_uring_prep_read(sqe, fds_direct[rg.file], rg.addr - head, (unsigned) a_len, a_off);
+                io_uring_sqe_set_data(sqe, &tags[n_tags]);
+                n_tags++;
+                pending[b]++;
+                submitted++;
+            }
+        }
+        const auto t0 = std::chrono::steady_clock::now();
+        if (submitted) io_uring_submit_and_wait(ring, submitted);
+        for (int i = 0; i < submitted; i++) {
+            io_uring_cqe * cqe = nullptr;
+            if (io_uring_wait_cqe(ring, &cqe) < 0) { LOG_ERR("cqe wait failed\n"); abort(); }
+            auto * tag = (sqe_tag *) io_uring_cqe_get_data(cqe);
+            if (cqe->res < 0) { // e.g. compressed extent rejecting O_DIRECT
+                load_buffered(*tag->r);
+                n_fallback++;
+            } else {
+                io_bytes += (size_t) cqe->res;
+                n_uring++;
+            }
+            if (--pending[tag->req_idx] == 0) {
+                complete_expert(batch[tag->req_idx]);
+            }
+            io_uring_cqe_seen(ring, cqe);
+        }
+        io_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                     std::chrono::steady_clock::now() - t0).count();
+        // experts whose every range fell back to buffered still need completion
+        for (int b = 0; b < nb; b++) {
+            bool had_sqe = false;
+            for (int t = 0; t < n_tags; t++) if (tags[t].req_idx == b) { had_sqe = true; break; }
+            if (!had_sqe) complete_expert(batch[b]);
+        }
     }
 
     void enqueue(int l, int e, int prio) {
@@ -289,7 +375,7 @@ struct arena {
         for (const auto &r : q) if (r.layer == l && r.expert == e) return;
         q.push_back({l, e, prio});
         std::push_heap(q.begin(), q.end(), [](const req &a, const req &b) { return a.prio > b.prio; });
-        cv.notify_one();
+        if (prio == 0) cv.notify_all(); else cv.notify_one();
     }
 
     void on_topk(int l, const int32_t *ids, int k, int n_tokens) {
@@ -955,7 +1041,10 @@ int main(int argc, char ** argv) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
         }
-        for (int i = 0; i < g_workers; i++) g_ar.workers.emplace_back([] { g_ar.worker(); });
+        for (int i = 0; i < g_workers; i++) {
+            const bool demand_only = i < 2 && g_workers > 3;  // reserve 2 for demand latency
+            g_ar.workers.emplace_back([demand_only] { g_ar.worker(demand_only); });
+        }
         g_ar.scorer = std::thread([] { g_ar.score_loop(); });
         g_ar.janitor = std::thread([] { g_ar.janitor_loop(); });
     }
