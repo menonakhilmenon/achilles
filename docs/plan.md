@@ -263,11 +263,12 @@ Remaining backlog, ranked by expected payoff ÷ effort:
    (gate/up/down co-located per expert) into a shadow file; the arena's range
    table just points there. Fewer, larger, aligned reads: +20–40% effective
    SSD bandwidth for ~a day of work. Costs ~220 GB extra disk (budget allows).
-4. **Speculation × plan integration** — n-gram drafts give multi-token
-   lookahead; batch-verify already routes future tokens, so their topk can
-   extend the rolling plan across tokens — the only form of cross-token
-   prediction that survived Phase 1. Also re-measure spec ON with plan-aware
-   eviction (never benchmarked together).
+4. ~~**Speculation × plan integration**~~ — **CLOSED 2026-07-13** (§23–24):
+   n-gram drafts fire too rarely (9/96 tok); MTP self-drafting ported and
+   working (llama.cpp branch glm-dsa-mtp, arena --spec-mtp) but loses to
+   no-speculation on byte economics — verify batches pay the union of
+   drafted tokens' expert sets at ~26% cross-token overlap. Parked; revives
+   when hit ≥85% / Gen5 / RAM-rich (then it attacks the RAM-bandwidth wall).
 5. ~~**Combined clean re-measure**~~ — **DONE 2026-07-13** (§23: decode 1.12 ±0.006, prefill 9.69). Was: (FULL profile, owner away): decode triple +
    prefill A/B with everything on — establishes the honest headline number.
 6. **Hardware**: Gen5 SSD (~12–14 GB/s → projected 2.5–3.5 tok/s); later

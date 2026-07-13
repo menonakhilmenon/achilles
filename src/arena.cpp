@@ -465,6 +465,7 @@ static int g_ppl_n = 600;
 static std::string g_gate;  // wait for this file post-install (cgroup staging)
 static int g_spec = 0;
 static int g_spec_mtp = 0;   // MTP self-drafting depth (blk.78 nextn head)
+static float g_spec_pmin = 0.0f;  // only draft tokens above this probability
 static common_speculative * g_spec_ctx = nullptr;
 static llama_context * g_ctx_dft = nullptr;
 static int g_pstream = 1;  // prefill layer-streaming (0 = off)  // n-gram lookup speculation depth (0 = off)
@@ -835,6 +836,7 @@ int main(int argc, char ** argv) {
         }
         else if (a == "--spec") g_spec = atoi(argv[++i]);
         else if (a == "--spec-mtp") g_spec_mtp = atoi(argv[++i]);
+        else if (a == "--spec-pmin") g_spec_pmin = (float) atof(argv[++i]);
         else if (a == "--pstream") g_ar.pstream = atoi(argv[++i]);
         else if (a == "--dump") g_dump = fopen(argv[++i], "wb");
         else if (a == "--shadow") g_shadow_prefix = argv[++i];
@@ -1014,6 +1016,7 @@ int main(int argc, char ** argv) {
         params.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_MTP };
         params.speculative.draft.n_max = g_spec_mtp;
         params.speculative.draft.n_min = 0;
+        params.speculative.draft.p_min = g_spec_pmin;
         // the MTP ctx only ever decodes draft-sized batches; a full-size batch
         // makes the scheduler reserve worst-case (multi-GB, host-visible
         // fallback when VRAM is full - the 2026-07-13 anon explosions)

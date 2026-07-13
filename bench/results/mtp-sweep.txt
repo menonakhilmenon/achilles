@@ -1,0 +1,16 @@
+--- d3-p0 (depth=3 pmin=0.0) ---
+ACHILLES spec: tried=62 accepted=24 (39%)
+ACHILLES decode:  64 tok in 115.2s = 0.556 tok/s
+ACHILLES decode-detail: stall=69.3s io=539.7GB io_worker_time=401.8s per_stream_bw=1.34GB/s hit=0.518 (decode-only)
+--- d3-p6 (depth=3 pmin=0.6) ---
+ACHILLES spec: tried=24 accepted=15 (62%)
+ACHILLES decode:  64 tok in 69.3s = 0.924 tok/s
+ACHILLES decode-detail: stall=42.0s io=289.1GB io_worker_time=198.5s per_stream_bw=1.46GB/s hit=0.569 (decode-only)
+--- d3-p8 (depth=3 pmin=0.8) ---
+FAILED: core-dump
+--- d2-p8 (depth=2 pmin=0.8) ---
+FAILED: core-dump
+--- base (depth=0 pmin=0) ---
+ACHILLES decode:  64 tok in 58.3s = 1.099 tok/s
+ACHILLES decode-detail: stall=34.8s io=217.0GB io_worker_time=125.2s per_stream_bw=1.73GB/s hit=0.629 (decode-only)
+SWEEP_DONE

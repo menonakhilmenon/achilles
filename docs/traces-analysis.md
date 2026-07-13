@@ -590,6 +590,38 @@ Cumulative, measured same-day, same box: 0.643 (old defaults, cold) →
 0.803 (fetch fix) → 0.826 (+reuse) → 1.122 (+io_uring) → **1.12 confirmed**
 at 96 tokens with shadow; prefill 6.83 → 9.69.
 
+### 24. MTP self-drafting: built, works, and loses to its own byte bill
+
+Ported GLM-5.2's NextN/MTP head to llama.cpp (private branch glm-dsa-mtp —
+first glm-dsa MTP inference implementation; loader + deepseek2 h_nextn export
++ graph_mtp) and integrated as arena --spec-mtp. **It works**: the model
+drafts for itself, 40% raw acceptance at temp 0.7, 62% with --spec-pmin 0.6.
+
+Getting there cost three whole-system crashes (freezes + a kernel panic),
+all one bug: **glm-dsa lacked the per-arch nextn KV filter (STEP35 has it),
+so the MTP draft context allocated + memset a ~34 GB full-model KV** —
+unreclaimable anon + invisible GTT. Root-caused with a caged harness
+(src/mtp_probe.cpp; MemoryMax=8G, MemorySwapMax=0, gdb attach mid-climb).
+Cage method + swap-0-for-experiments are now standing policy. Bonus finds:
+CPU repack would silently break the MAP_FIXED invariant (now forced off);
+full-size batch reserve on the MTP ctx wastes GBs (now draft-sized).
+
+The economics, measured (64-tok decode, budget 28, hybrid, cold):
+
+| config | acceptance | tok/s | decode IO |
+|---|---|---|---|
+| **no speculation** | — | **1.099** | **217 GB** |
+| mtp d3 pmin .6 | 62% | 0.924 | 289 GB |
+| mtp d3 pmin 0 | 39% | 0.556 | 540 GB |
+
+Verify batches pay for the UNION of drafted tokens' expert sets, and
+cross-token expert overlap is ~26% (§17's constant, striking a third time).
+On a byte-bound SSD regime (§21), speculation's extra bytes exceed the
+tokens it saves at any achievable acceptance. **PARKED with revival
+conditions**: hit rate ≥ ~85% (bytes stop binding), Gen5-class SSD, or
+RAM-rich boxes where verify batches amortize RAM bandwidth instead of SSD.
+Known issue: --spec-pmin ≥ 0.8 core-dumps (untriaged; irrelevant while parked).
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
