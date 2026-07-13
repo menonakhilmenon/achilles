@@ -664,6 +664,14 @@ The stall is bandwidth at round granularity; there is no software left in it.
 Decode on this hardware: **1.12 tok/s, measured to its wall from two
 directions.** Gen5 moves the wall; nothing else does.
 
+### 27. Budget sweep: +2.7% at 32 GiB; 36-40 GiB is headless-only
+
+budget 28 -> 32 GiB: 1.116 -> **1.146 tok/s** (hit .629 -> .652), on the
+predicted ~1.4%/4GiB curve. 36/40 GiB envelopes (52-56G max) do not fit
+beside a logged-in desktop (~11G); preflight auto-skips them. Extrapolated
+headless ceiling ~1.17-1.19. budget 32 is the new FULL default
+(staged_run.sh, envelope 46/48G).
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity

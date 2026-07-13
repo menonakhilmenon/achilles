@@ -1,0 +1,8 @@
+--- b32 (budget=32 high=46G) ---
+ACHILLES decode:  64 tok in 55.8s = 1.146 tok/s
+ACHILLES decode-detail: stall=32.2s io=203.1GB io_worker_time=110.6s per_stream_bw=1.84GB/s hit=0.652 (decode-only)
+ACHILLES rounds: n=4570 avg_stall=7.05ms handoff_avg=0.14ms demand_io_avg=21.78ms demands=13358
+SKIP b36: 53G avail < 56
+SKIP b40: 53G avail < 60
+--- budget=28 reference: 1.116 (hit .629) ---
+DONE
