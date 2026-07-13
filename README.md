@@ -9,12 +9,13 @@ serves the misses — with a predictor steering both prefetch and eviction.
 
 | GLM-5.2 UD-Q2_K_XL | naive (kernel mmap) | **achilles-arena, full profile** |
 |---|---|---|
-| decode | 0.30 tok/s | **1.12 tok/s** (cold, controlled; io_uring O_DIRECT, §22) |
-| prefill (~2700-token prompt) | ~0.5 tok/s | **8.7 tok/s** (layer-streaming, +27% over demand paging) |
+| decode | 0.30 tok/s | **1.12 tok/s** — 3.7×, ±0.006 over triple (§23) |
+| prefill (~2700-token prompt) | ~0.5 tok/s | **9.7 tok/s** — ~19× (layer-streaming + shadow + io_uring) |
 
-Polite profile (desktop stays usable): ~0.4–0.5 tok/s decode. Earlier 0.94
-readings were warm-cache flattered — see traces-analysis §21 for the honest
-accounting and the byte-budget lesson behind the current defaults.
+Every number cold, controlled, token-identity-gated. Polite profile (desktop
+stays usable): ~0.4–0.5 tok/s decode. Earlier 0.94 readings were warm-cache
+flattered — traces-analysis §21 has the honest accounting; §21–23 the
+one-day 0.64→1.12 progression (fetch tuning, io_uring, expert-major shadow).
 
 GLM-4.5-Air (110B) runs at 3.4 tok/s memory-constrained / 15.3 unconstrained.
 Output is token-identical to unpaged inference — the arena is bit-exact.

@@ -560,6 +560,36 @@ tax on every miss byte became the next target. A/B at the §21 best config
 io_uring is now the default in every bench script; `--no-uring` remains a
 flag for filesystems that reject O_DIRECT.
 
+### 23. Expert-major shadow + combined headline (2026-07-13 morning)
+
+Shadow repack (scripts/repack_shadow.py + arena --shadow): experts rewritten
+contiguously in original-aligned windows (§ the O_DIRECT overshoot contract).
+**Token-identical at both scales.** Qwen decode +15.6% (many small slices
+merge); GLM decode neutral (slices were already ~4 MB) but GLM long-prompt
+prefill +12% on top of layer-streaming (sequential reads get closer to raw).
+Repack cost: 2.7 min for 219 GiB (the drive is faster than my estimates).
+
+Combined headline suite (fetch 2 + reuse + io_uring + shadow + pstream,
+throughput-performance profile, cold, all runs token-gated):
+
+| GLM-5.2 UD-Q2_K_XL | result |
+|---|---|
+| decode, 96 tok × 3 | **1.113 / 1.120 / 1.124 tok/s** (3.7× naive) |
+| prefill 2697 tok, pstream on | **9.69 tok/s** (vs 7.58 off, +28%; ~19× naive) |
+| decode after long prefill | 0.98 (was 0.53 pre-uring/reuse) |
+| spec 4 (n-gram) | 1.088 — 78% acceptance but only 9 draft attempts in 96 tok |
+
+Speculation note: the n-gram draft only fires when the recent context repeats
+an n-gram; on non-repetitive generation it's idle (9 tries/96 tok) and its
+overhead nets slightly negative. Kept opt-in. The spec×plan callback work
+(per-row gate-ahead during verify batches) is in and correct, but the
+draft-source is the limiting reagent — a real cross-token plan needs a
+draft model or richer lookup, which re-opens the parked draft-model track.
+
+Cumulative, measured same-day, same box: 0.643 (old defaults, cold) →
+0.803 (fetch fix) → 0.826 (+reuse) → 1.122 (+io_uring) → **1.12 confirmed**
+at 96 tokens with shadow; prefill 6.83 → 9.69.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity

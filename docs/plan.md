@@ -259,7 +259,7 @@ Remaining backlog, ranked by expected payoff ÷ effort:
    decode, now default in staged_run.sh. Key negative: features can't close
    the remaining ~17pp to Belady — that headroom is future-stream knowledge,
    i.e. item 4 (speculation × plan) got more valuable.
-3. **Expert-major shadow repack** — offline tool rewrites experts contiguously
+3. ~~**Expert-major shadow repack**~~ — **DONE 2026-07-13** (§23: token-identical both scales; +15.6% Qwen decode, +12% GLM prefill, GLM decode neutral). Was: — offline tool rewrites experts contiguously
    (gate/up/down co-located per expert) into a shadow file; the arena's range
    table just points there. Fewer, larger, aligned reads: +20–40% effective
    SSD bandwidth for ~a day of work. Costs ~220 GB extra disk (budget allows).
@@ -268,10 +268,17 @@ Remaining backlog, ranked by expected payoff ÷ effort:
    extend the rolling plan across tokens — the only form of cross-token
    prediction that survived Phase 1. Also re-measure spec ON with plan-aware
    eviction (never benchmarked together).
-5. **Combined clean re-measure** (FULL profile, owner away): decode triple +
+5. ~~**Combined clean re-measure**~~ — **DONE 2026-07-13** (§23: decode 1.12 ±0.006, prefill 9.69). Was: (FULL profile, owner away): decode triple +
    prefill A/B with everything on — establishes the honest headline number.
 6. **Hardware**: Gen5 SSD (~12–14 GB/s → projected 2.5–3.5 tok/s); later
    two-drive striping. Pure money-for-bytes, no code risk.
+6b. **VRAM expert tier** (owner idea 2026-07-13, parked until the RAM wall):
+   third cache tier VRAM←RAM←SSD with the same reuse/plan machinery. Measured
+   CDF: top-1024 experts (11.7 GB) = only 24.6% of activations (routers are
+   load-balanced; no fat head) → lifts the ~6 tok/s RAM-bandwidth wall to ~8.
+   Costs fork-level surgery (fused expert tensors can't split via -ot) and
+   evicting the dense skeleton from VRAM. Sequence AFTER Gen5 + high
+   residency make RAM the binding constraint.
 7. **MacBook/Metal port** — separate track (see recalibration below); target
    is Air-class, not the beast.
 
