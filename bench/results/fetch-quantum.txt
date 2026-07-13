@@ -1,0 +1,14 @@
+--- fetch=2 (2MB prefetch quanta) ---
+ACHILLES decode:  64 tok in 55.7s = 1.149 tok/s
+ACHILLES rounds: n=4570 avg_stall=7.04ms handoff_avg=0.19ms demand_io_avg=21.32ms demands=13356
+OUTPUT:  Include a diagram.
+--- fetch=4 (2MB prefetch quanta) ---
+ACHILLES decode:  64 tok in 56.0s = 1.144 tok/s
+ACHILLES rounds: n=4435 avg_stall=7.25ms handoff_avg=0.22ms demand_io_avg=19.11ms demands=11136
+OUTPUT:  Include a diagram.
+--- fetch=6 (2MB prefetch quanta) ---
+ACHILLES decode:  64 tok in 57.6s = 1.112 tok/s
+ACHILLES rounds: n=4170 avg_stall=7.92ms handoff_avg=0.38ms demand_io_avg=18.48ms demands=9272
+OUTPUT:  Include a diagram.
+TOKEN_IDENTICAL
+DONE

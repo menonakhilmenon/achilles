@@ -1,0 +1,10 @@
+--- fetch=4 (yield-gated) ---
+ACHILLES decode:  64 tok in 57.0s = 1.124 tok/s
+ACHILLES decode-detail: stall=32.8s io=224.5GB io_worker_time=113.2s per_stream_bw=1.98GB/s hit=0.709 (decode-only)
+ACHILLES rounds: n=4435 avg_stall=7.41ms handoff_avg=0.23ms demand_io_avg=20.11ms demands=11136
+--- fetch=6 (yield-gated) ---
+ACHILLES decode:  64 tok in 60.1s = 1.065 tok/s
+ACHILLES decode-detail: stall=35.3s io=261.2GB io_worker_time=125.9s per_stream_bw=2.07GB/s hit=0.757 (decode-only)
+ACHILLES rounds: n=4170 avg_stall=8.46ms handoff_avg=0.39ms demand_io_avg=20.23ms demands=9271
+--- fetch=2 reference (yield-gated, b32): 1.146 hit .652 ---
+DONE

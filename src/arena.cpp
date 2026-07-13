@@ -328,27 +328,35 @@ struct arena {
             }
             return;
         }
-        sqe_tag tags[WORKER_BATCH * 8];
+        // prefetch reads go down in 2 MB quanta so an arriving demand round
+        // finds a drive queue that drains in ~0.3 ms instead of ~10-30 ms of
+        // non-preemptible 12 MB commands. Demands stay whole-range (critical
+        // path; sub-chunking them measured slower).
+        const bool is_demand = batch[0].prio == 0;
+        const size_t QUANTUM = 2u << 20;
+        sqe_tag tags[WORKER_BATCH * 32];
         int pending[WORKER_BATCH] = {0};
         int n_tags = 0, submitted = 0;
         for (int b = 0; b < nb; b++) {
             for (const auto & rg : ranges[batch[b].layer][batch[b].expert]) {
                 if (!rg.addr || rg.len == 0) continue;
-                if (fds_direct[rg.file] < 0 || n_tags >= WORKER_BATCH * 8) {
-                    load_buffered(rg);
-                    continue;
-                }
+                if (fds_direct[rg.file] < 0) { load_buffered(rg); continue; }
                 const off_t  a_off = rg.foff & ~(off_t) 4095;
                 const size_t head  = (size_t) (rg.foff - a_off);
                 const size_t a_len = (rg.len + head + 4095) & ~(size_t) 4095;
-                io_uring_sqe * sqe = io_uring_get_sqe(ring);
-                if (!sqe) { load_buffered(rg); continue; }
-                tags[n_tags] = {&rg, b};
-                io_uring_prep_read(sqe, fds_direct[rg.file], rg.addr - head, (unsigned) a_len, a_off);
-                io_uring_sqe_set_data(sqe, &tags[n_tags]);
-                n_tags++;
-                pending[b]++;
-                submitted++;
+                const size_t step  = is_demand ? a_len : QUANTUM;
+                bool fell_back = false;
+                for (size_t off = 0; off < a_len && !fell_back; off += step) {
+                    const size_t seg = std::min(step, a_len - off);
+                    io_uring_sqe * sqe = n_tags < WORKER_BATCH * 32 ? io_uring_get_sqe(ring) : nullptr;
+                    if (!sqe) { load_buffered(rg); fell_back = true; break; }
+                    tags[n_tags] = {&rg, b};
+                    io_uring_prep_read(sqe, fds_direct[rg.file], rg.addr - head + off, (unsigned) seg, a_off + (off_t) off);
+                    io_uring_sqe_set_data(sqe, &tags[n_tags]);
+                    n_tags++;
+                    pending[b]++;
+                    submitted++;
+                }
             }
         }
         const auto t0 = std::chrono::steady_clock::now();

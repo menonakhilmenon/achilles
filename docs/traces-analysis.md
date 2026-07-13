@@ -672,6 +672,32 @@ beside a logged-in desktop (~11G); preflight auto-skips them. Extrapolated
 headless ceiling ~1.17-1.19. budget 32 is the new FULL default
 (staged_run.sh, envelope 46/48G).
 
+### 28. Burst mitigation, concluded: the answer to "can prediction still pay?"
+
+Owner asked whether predictive load/eviction could still be rescued by other
+techniques ("eager processing"). Research + three measured experiments:
+
+- **Literature (2025-26)**: SP-MoE, MoE-SpeQ, ADEPT, Fiddler/HybriMoE — the
+  field's answers are draft-predicted expert prefetch, domain priors, and
+  compute/IO pipelining, all targeting GPU<->DRAM at PCIe speeds. We built or
+  independently invented each; they lose here because our tier is 4x slower
+  per byte and §21's byte-law bites first.
+- **Expert-granular eager execution** (compute resident experts while misses
+  stream): killed by arithmetic the owner spotted — the layer's output needs
+  ALL experts, so only ~1.2 ms/layer of resident-expert compute can hide
+  inside the 7.3 ms burst → +8-12% for kernel-level fork surgery. Declined.
+  (True 2-token pipelining through stall windows needs llama-internals
+  rearchitecture — noted for a future phase, not this hardware push.)
+- **Prefetch quanta** (2 MB chunks so demand rounds start against a
+  drainable queue): keeps higher fetch from LOSING (fetch 4: 1.124 → 1.144)
+  but cannot make it WIN — the plateau is 1.144-1.149 across fetch 2-4.
+  Kept for robustness; default fetch 2 stands.
+
+**Final state: decode 1.149, rounds at ~74% of drive physics, and every
+"other technique" now has a measurement, not an opinion, attached to its
+grave. Bursts are mitigated to the extent this drive's command model allows;
+the rest is Gen5.**
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
