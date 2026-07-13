@@ -1014,28 +1014,49 @@ int main(int argc, char ** argv) {
         params.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_MTP };
         params.speculative.draft.n_max = g_spec_mtp;
         params.speculative.draft.n_min = 0;
-        spec_res = common_speculative_init_from_params(params, model, lctx);
+        // the MTP ctx only ever decodes draft-sized batches; a full-size batch
+        // makes the scheduler reserve worst-case (multi-GB, host-visible
+        // fallback when VRAM is full - the 2026-07-13 anon explosions)
+        common_params mtp_params = params;
+        mtp_params.n_batch  = std::max(64, g_spec_mtp + 2);
+        mtp_params.n_ubatch = mtp_params.n_batch;
+        spec_res = common_speculative_init_from_params(mtp_params, model, lctx);
         g_ctx_dft = spec_res ? spec_res->context() : nullptr;
         if (!g_ctx_dft) { LOG_ERR("arena: MTP draft context failed (no nextn layers?)\n"); return 1; }
         params.speculative.draft.ctx_tgt = lctx;
         params.speculative.draft.ctx_dft = g_ctx_dft;
         g_spec_ctx = common_speculative_init(params.speculative, 1);
-        common_speculative_begin(g_spec_ctx, 0, toks);
         LOG_INF("arena: MTP self-drafting enabled, depth %d (nextn layers: %d)\n",
                 g_spec_mtp, (int) llama_model_n_layer_nextn(model));
     }
     const double t_p0 = ggml_time_us() / 1e6;
-    {   // chunked prefill: llama_decode caps batches at n_batch tokens
+    {   // chunked prefill: llama_decode caps batches at n_batch tokens.
+        // With MTP, every position needs logits=1 so process() can extract
+        // h_nextn per row and populate the draft context's KV.
         const int nb = (int) llama_n_batch(lctx);
+        llama_batch pb2 = g_spec_ctx ? llama_batch_init(nb, 0, 1) : llama_batch{};
         for (size_t off = 0; off < toks.size(); off += nb) {
             const int n = (int) std::min(toks.size() - off, (size_t) nb);
             llama_batch pb = llama_batch_get_one(toks.data() + off, n);
+            if (g_spec_ctx) {
+                for (int i = 0; i < n; i++) {
+                    pb2.token[i] = toks[off + i];
+                    pb2.pos[i] = (llama_pos) (off + i);
+                    pb2.n_seq_id[i] = 1;
+                    pb2.seq_id[i][0] = 0;
+                    pb2.logits[i] = true;
+                }
+                pb2.n_tokens = n;
+                pb = pb2;
+            }
             if (llama_decode(lctx, pb)) { LOG_ERR("prefill chunk failed\n"); return 1; }
             if (g_spec_ctx && !common_speculative_process(g_spec_ctx, pb)) {
                 LOG_ERR("arena: MTP process failed on prefill chunk\n"); return 1;
             }
         }
+        if (g_spec_ctx) llama_batch_free(pb2);
     }
+    if (g_spec_ctx) common_speculative_begin(g_spec_ctx, 0, toks);
     const double t_p1 = ggml_time_us() / 1e6;
     g_ar.snapshot();  // decode-only deltas for the final stats print
 
@@ -1092,6 +1113,9 @@ int main(int argc, char ** argv) {
                 /*prompt*/ &hist, /*result*/ &draft };
             common_speculative_draft(g_spec_ctx);
             hist.push_back(t0);
+            // draft() decoded speculative rows into ctx_dft's KV at >= n_past;
+            // rewind before the verify decode or process() sees stale positions
+            llama_memory_seq_rm(llama_get_memory(g_ctx_dft), 0, n_past, -1);
         } else if (g_spec > 0) {
             draft = ngram_draft(g_spec);
         }
