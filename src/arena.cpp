@@ -622,7 +622,7 @@ static bool cb_arena(struct ggml_tensor * t, bool ask, void *) {
         // prefill ubatches stay excluded (wrong hidden + zero-row last layer)
         const int64_t nr = is_norm ? ggml_nrows(t) : 0;
         return g_on && (is_topk || (is_norm && nr >= 1 && nr <= 8) ||
-                        (is_sel && g_ar.bias_strength > 0.f));
+                        (is_sel && (g_ar.bias_strength > 0.f || g_dump)));
     }
     if (!g_on) return true;
     if (ggml_nelements(t) == 0) return true;
@@ -630,21 +630,38 @@ static bool cb_arena(struct ggml_tensor * t, bool ask, void *) {
     struct cbscope { const std::chrono::steady_clock::time_point t0;
         ~cbscope() { g_ar.cb_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - t0).count(); } } cbsc{t_cb0};
-    if (is_sel && g_ar.bias_strength > 0.f && t->type == GGML_TYPE_F32) {
+    if (is_sel && (g_ar.bias_strength > 0.f || g_dump) && t->type == GGML_TYPE_F32) {
         const int l = atoi(t->name + 21);
         if (l >= 0 && l < g_ar.n_layer && g_ar.pageable[l]) {
             const int E = (int) t->ne[0], T = (int) t->ne[1];
             static std::vector<float> sel;
             sel.resize((size_t) E * T);
             ggml_backend_tensor_get(t, sel.data(), 0, sel.size() * 4);
-            {
+            // routing-ranking dump: top-24 router ranking per decode token (T==1)
+            // so we can measure whether rank-9..24 experts flip into top-8 soon
+            if (g_dump && T == 1) {
+                std::vector<std::pair<float, int>> r(E);
+                for (int e = 0; e < E; e++) r[e] = {sel[e], e};
+                const int topn = std::min(24, E);
+                std::partial_sort(r.begin(), r.begin() + topn, r.end(),
+                                  [](auto &a, auto &b) { return a.first > b.first; });
+                std::lock_guard<std::mutex> lk(g_dump_mu);
+                fputc('R', g_dump);
+                int32_t hdr[2] = {l, topn};
+                fwrite(hdr, 4, 2, g_dump);
+                for (int i = 0; i < topn; i++) {
+                    int32_t id = r[i].second; float sc = r[i].first;
+                    fwrite(&id, 4, 1, g_dump); fwrite(&sc, 4, 1, g_dump);
+                }
+            }
+            if (g_ar.bias_strength > 0.f) {
                 std::lock_guard<std::mutex> lk(g_ar.mu);
                 for (int e = 0; e < E; e++) {
                     if (!g_ar.valid[g_ar.idx(l, e)]) continue;
                     for (int j = 0; j < T; j++) sel[(size_t) j * E + e] += g_ar.bias_strength;
                 }
+                ggml_backend_tensor_set(t, sel.data(), 0, sel.size() * 4);
             }
-            ggml_backend_tensor_set(t, sel.data(), 0, sel.size() * 4);
         }
         return true;
     }

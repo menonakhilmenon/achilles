@@ -811,6 +811,47 @@ latency" — is correct and now banked (+2.5%); the ceiling above it is recall.
 can leave the demand stall-loop spinning — drive idle, one core hot, no
 progress. Rare; `systemctl stop` clears it. A completion watchdog is a TODO.)
 
+### 32. The near-miss ("bubble expert") hypothesis: real structure, no payoff
+
+Hypothesis (user): experts ranked just below the top-8 cutoff should enter the
+top-8 in following tokens, because routing margins are razor-thin (§17: 95% of
+top-8 boundaries < 0.01) — a bubble expert is one perturbation away from
+selection. Tested by dumping the full top-24 router ranking per layer per decode
+token ('R' records; verified top-8-by-probs == actually-selected at 100%, so
+GLM-5.2 uses plain global top-8, no group routing).
+
+**Premise confirmed.** P(a rank-r expert is selected at token t+1):
+
+| source rank | P(selected next token) |
+|---|---|
+| 8 (first below cut) | 13.8% |
+| 9–11 | ~11–12% |
+| 20–23 (deep) | ~5.5% |
+| random baseline | 3.2% |
+
+A bubble expert is ~4× likelier than random to be selected next token. Real.
+
+**But the payoff ceiling is low.** Routing turnover is brutal: **70% of a
+layer's top-8 is new every token** (5.58 of 8; only 30% reused). Near-miss
+coverage of those NEW experts: top-8 band = 14.7%, top-16 = 23.4%. The other
+~85% of incoming experts jump in from *deep* in the ranking (24+) — unpredictable
+from this token. So the bubble is real but explains only a sliver of the churn.
+
+**Two implementations, both fail:**
+- *Prefetch* bubble experts (lowest prio, idle-only): throttled to a near-no-op —
+  the drive is already 72% utilized at fetch=6, no idle slack — and the extra
+  io_uring pressure tripped the lost-completion hang (§31 footnote). No benefit.
+- *Eviction-bias* (the "free" version — a fractional popularity credit to
+  *resident* bubble experts, per §21's "prediction on eviction is free"): hit
+  0.752 → 0.754 (+0.2pp), wall flat. Negligible, because the reuse evictor
+  already protects recently-used experts and a resident bubble expert is usually
+  a recently-used one — the signals are redundant.
+
+Conclusion: GLM-5.2's routing is genuinely volatile (70%/token turnover, incoming
+experts mostly from deep ranks), and no cheap same-layer predictor beats it. The
+decode recall ceiling from §31 stands. Kept the ranking-dump instrumentation
+(`--dump`, zero cost when off) for future routing studies; removed the feature.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
