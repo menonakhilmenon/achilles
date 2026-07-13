@@ -95,7 +95,10 @@ struct arena {
     std::condition_variable jcv;
     std::vector<std::pair<int,int>> pending_drops;
     size_t pending_drop_bytes = 0;  // evicted-but-not-yet-madvised (real RSS!)
-    int delta = 3, fetch = 2, pstream = 1;   // fetch>2 over-fetches: saturated-SSD sweep 2026-07-13
+    int delta = 3, fetch = 6, pstream = 1;   // fetch=6: Gen5 is latency-bound with idle
+                                             // bandwidth, so wider prefetch cuts stall
+                                             // (§31). fetch=2 was the Gen4 saturated-SSD
+                                             // optimum; higher hurt there, helps here.
     float decay = 0.98f;
     bool lru = true;                    // Belady analysis: LRU 61% vs LFU 50% on GLM-5.2
     bool reuse = false;                 // gap/pop reuse-distance policy (sim: +2pp over LRU)

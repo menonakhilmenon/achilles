@@ -9,7 +9,7 @@ serves the misses — with a predictor steering both prefetch and eviction.
 
 | GLM-5.2 UD-Q2_K_XL | naive (kernel mmap) | **achilles-arena, full profile** |
 |---|---|---|
-| decode | 0.30 tok/s | **1.57 tok/s** — 5.2× (Gen5 SSD + vectorized scorer, §30; 1.15 on Gen4) |
+| decode | 0.30 tok/s | **1.60 tok/s** — 5.3× (Gen5 SSD + vectorized scorer + wide prefetch, §30–31; 1.15 on Gen4) |
 | prefill (~2700-token prompt) | ~0.5 tok/s | **25.1 tok/s** — ~50× (layer-streaming + shadow + io_uring + full-batch ubatches) |
 
 Every number cold, controlled, token-identity-gated. Polite profile (desktop
@@ -35,8 +35,10 @@ Key empirical findings along the way (details in docs/traces-analysis.md §1–1
 40% of a token's experts recur within 1 token, 80% within 8; trained linear
 probes predict experts 8 layers ahead at 52–90% recall (model-dependent);
 routing margins are razor-thin (95% of top-8 boundaries < 0.01); cross-token
-prediction is a dead end on GLM-5.2; on SSD-bound hardware, prediction spent
-on *eviction* is free while extra prefetch bytes are poison.
+prediction is a dead end on GLM-5.2; prefetch's value is drive-specific — extra
+bytes are poison on a bandwidth-saturated drive (Gen4) but net-positive on a
+latency-bound one with idle bandwidth (Gen5: wider prefetch buys +2.5%, §31),
+though capped by recall since a round stalls if *any* of its experts miss.
 
 ## Hardware notes (measured on Ryzen 9800X3D / 64GB / RX 9070 XT / Fury Renegade)
 

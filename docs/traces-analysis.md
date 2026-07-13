@@ -762,6 +762,55 @@ re-read per layer). Remaining non-stall targets: the 92 ms residual callback
 GPU↔CPU sync bubbles) and the 185 ms graph compute. Stall (315 ms) stays
 the bytes-moved floor from §26/§29.
 
+### 31. Predictive prefetch revisited on Gen5: the "poison" law was drive-specific
+
+§21 established "extra prefetch bytes are poison" — but that was measured on a
+*bandwidth-saturated* Gen4 drive. §29 moved decode to a latency-bound regime, so
+the law was re-tested. Direct measurement (sampling `/sys/block/nvme0n1/stat`
+during decode) settled it: at the old `fetch=2` default the Gen5 drive runs at
+**57% utilization, 5.1 of 13.2 GB/s, median queue depth 9** — nearly half idle.
+There is bandwidth to spend on hiding latency, exactly the opposite of Gen4.
+
+Widening prefetch converts it, monotonically (token-identical — prefetch only
+steers loading, never the matmul):
+
+| fetch | decode tok/s | stall ms/tok | decode hit | drive util |
+|---|---|---|---|---|
+| 2 | 1.566 | 317 | 0.649 | 57% |
+| 4 | 1.594 | 305 | 0.704 | 63% |
+| 6 | **1.605** | 296 | 0.752 | 71% |
+
+Default raised **2 → 6** (+2.5%). Returns diminish (2→4 buys 11 ms, 4→6 buys 3)
+and SSD reads don't wear NAND, so 6 is the practical knee.
+
+Two things that should have helped but **didn't**:
+
+- **Prefetch-through-demand** (relax the yield gate so non-reserved workers keep
+  prefetching during a demand stall): exact null result — same util, same hit,
+  same bytes. The prefetch queue is *already empty* during stalls; the gate was
+  never the limiter. Reverted.
+- **Trained d3+d8 linear probes** (README's 52-90%-recall predictors): actively
+  *worse* — hit 0.752 → 0.702, wall +102 ms, +65 GB moved, +34 ms scoring. On
+  GLM-5.2 the model's own router matrix for layer L+d (gate-ahead) is a stronger
+  predictor than any linear probe on hidden states — you can't beat the real
+  gate. The d8 far-stage just prefetches wrong experts and evicts useful ones.
+  Not used.
+
+**Why prefetch is capped here, and it isn't bandwidth or scheduling:** a decode
+round stalls if *any* of its ~8 experts miss. At per-expert recall 0.75,
+P(all present) = 0.75⁸ ≈ 10%, so ~90% of rounds still eat a demand stall no
+matter how much bandwidth, how many workers, or how much lead time we add. That
+is why hit 0.649 → 0.752 moved stall only 317 → 296 ms. Decode is **recall-
+limited**, and gate-ahead is already near the achievable recall on GLM-5.2's
+razor-thin routing margins (95% of top-8 boundaries < 0.01, §17). Beyond here,
+decode needs a fundamentally better predictor or expert *substitution* (a
+quality trade), not more prefetch. The user's instinct — "prefetching reduces
+latency" — is correct and now banked (+2.5%); the ceiling above it is recall.
+
+(Latent bug noted: under back-to-back heavy runs a dropped io_uring completion
+can leave the demand stall-loop spinning — drive idle, one core hot, no
+progress. Rare; `systemctl stop` clears it. A completion watchdog is a TODO.)
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
