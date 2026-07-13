@@ -1,0 +1,7 @@
+20:08:11 copy glm shards start (247G, ~10 min)
+20:09:14 copy glm done
+20:10:06 small models copied
+20:10:06 shadow regen on gen5 start (~10 min)
+20:14:03 shadow regen done
+20:14:04 symlinks swapped
+20:15:30 GEN5_DONE

@@ -1,33 +1,33 @@
 --- ident-plain ---
-ACHILLES prefill: 23 tok in 17.7s = 1.30 tok/s
-ACHILLES decode:  24 tok in 23.3s = 1.030 tok/s
-ACHILLES decode-detail: stall=13.9s io=82.0GB io_worker_time=50.6s per_stream_bw=1.62GB/s hit=0.621 (decode-only)
+ACHILLES prefill: 23 tok in 11.3s = 2.03 tok/s
+ACHILLES decode:  24 tok in 17.4s = 1.380 tok/s
+ACHILLES decode-detail: stall=8.2s io=82.5GB io_worker_time=30.8s per_stream_bw=2.68GB/s hit=0.621 (decode-only)
 --- ident-shadow ---
-ACHILLES prefill: 23 tok in 18.6s = 1.23 tok/s
-ACHILLES decode:  24 tok in 22.6s = 1.064 tok/s
-ACHILLES decode-detail: stall=13.7s io=82.0GB io_worker_time=49.6s per_stream_bw=1.65GB/s hit=0.621 (decode-only)
+ACHILLES prefill: 23 tok in 11.3s = 2.04 tok/s
+ACHILLES decode:  24 tok in 17.2s = 1.398 tok/s
+ACHILLES decode-detail: stall=8.0s io=82.5GB io_worker_time=29.9s per_stream_bw=2.76GB/s hit=0.621 (decode-only)
 --- decode1 ---
-ACHILLES prefill: 23 tok in 18.2s = 1.27 tok/s
-ACHILLES decode:  96 tok in 85.7s = 1.120 tok/s
-ACHILLES decode-detail: stall=50.4s io=317.0GB io_worker_time=178.9s per_stream_bw=1.77GB/s hit=0.638 (decode-only)
+ACHILLES prefill: 23 tok in 11.2s = 2.05 tok/s
+ACHILLES decode:  96 tok in 67.5s = 1.421 tok/s
+ACHILLES decode-detail: stall=31.2s io=319.2GB io_worker_time=113.8s per_stream_bw=2.80GB/s hit=0.638 (decode-only)
 --- decode2 ---
-ACHILLES prefill: 23 tok in 18.1s = 1.27 tok/s
-ACHILLES decode:  96 tok in 85.4s = 1.124 tok/s
-ACHILLES decode-detail: stall=50.3s io=317.0GB io_worker_time=178.7s per_stream_bw=1.77GB/s hit=0.638 (decode-only)
+ACHILLES prefill: 23 tok in 11.2s = 2.04 tok/s
+ACHILLES decode:  96 tok in 67.5s = 1.422 tok/s
+ACHILLES decode-detail: stall=31.2s io=319.1GB io_worker_time=113.9s per_stream_bw=2.80GB/s hit=0.638 (decode-only)
 --- decode3 ---
-ACHILLES prefill: 23 tok in 18.2s = 1.27 tok/s
-ACHILLES decode:  96 tok in 86.3s = 1.113 tok/s
-ACHILLES decode-detail: stall=51.0s io=317.0GB io_worker_time=181.1s per_stream_bw=1.75GB/s hit=0.638 (decode-only)
+ACHILLES prefill: 23 tok in 11.2s = 2.05 tok/s
+ACHILLES decode:  96 tok in 67.5s = 1.422 tok/s
+ACHILLES decode-detail: stall=31.2s io=319.1GB io_worker_time=113.9s per_stream_bw=2.80GB/s hit=0.638 (decode-only)
 --- spec4 ---
 ACHILLES spec: tried=9 accepted=7 (78%)
-ACHILLES prefill: 23 tok in 18.3s = 1.26 tok/s
-ACHILLES decode:  96 tok in 88.3s = 1.088 tok/s
-ACHILLES decode-detail: stall=52.2s io=334.1GB io_worker_time=201.7s per_stream_bw=1.66GB/s hit=0.622 (decode-only)
+ACHILLES prefill: 23 tok in 11.2s = 2.05 tok/s
+ACHILLES decode:  96 tok in 69.3s = 1.385 tok/s
+ACHILLES decode-detail: stall=32.2s io=336.4GB io_worker_time=126.5s per_stream_bw=2.66GB/s hit=0.622 (decode-only)
 --- prefill-ps1 ---
-ACHILLES prefill: 2697 tok in 278.2s = 9.69 tok/s
-ACHILLES decode:  8 tok in 8.2s = 0.979 tok/s
-ACHILLES decode-detail: stall=5.2s io=35.6GB io_worker_time=22.3s per_stream_bw=1.60GB/s hit=0.522 (decode-only)
+ACHILLES prefill: 2697 tok in 249.1s = 10.83 tok/s
+ACHILLES decode:  8 tok in 6.6s = 1.219 tok/s
+ACHILLES decode-detail: stall=3.5s io=35.7GB io_worker_time=15.0s per_stream_bw=2.38GB/s hit=0.518 (decode-only)
 --- prefill-ps0 ---
-ACHILLES prefill: 2697 tok in 355.9s = 7.58 tok/s
-ACHILLES decode:  8 tok in 8.5s = 0.940 tok/s
-ACHILLES decode-detail: stall=5.1s io=35.1GB io_worker_time=22.1s per_stream_bw=1.59GB/s hit=0.525 (decode-only)
+ACHILLES prefill: 2697 tok in 317.2s = 8.50 tok/s
+ACHILLES decode:  8 tok in 6.5s = 1.224 tok/s
+ACHILLES decode-detail: stall=3.4s io=35.3GB io_worker_time=14.8s per_stream_bw=2.39GB/s hit=0.525 (decode-only)

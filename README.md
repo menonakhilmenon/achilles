@@ -9,8 +9,8 @@ serves the misses — with a predictor steering both prefetch and eviction.
 
 | GLM-5.2 UD-Q2_K_XL | naive (kernel mmap) | **achilles-arena, full profile** |
 |---|---|---|
-| decode | 0.30 tok/s | **1.15 tok/s** — 3.8× (§23–27; ~1.18 headless) |
-| prefill (~2700-token prompt) | ~0.5 tok/s | **22.4 tok/s** — ~45× (layer-streaming + shadow + io_uring + full-batch ubatches, §25) |
+| decode | 0.30 tok/s | **1.44 tok/s** — 4.8× (Gen5 SSD, §29; 1.15 on Gen4) |
+| prefill (~2700-token prompt) | ~0.5 tok/s | **25.1 tok/s** — ~50× (layer-streaming + shadow + io_uring + full-batch ubatches) |
 
 Every number cold, controlled, token-identity-gated. Polite profile (desktop
 stays usable): ~0.4–0.5 tok/s decode. Earlier 0.94 readings were warm-cache

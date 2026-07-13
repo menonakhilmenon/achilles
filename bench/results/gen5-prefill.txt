@@ -1,0 +1,9 @@
+--- ub2048 ---
+ACHILLES prefill: 2697 tok in 107.6s = 25.06 tok/s
+ACHILLES decode:  8 tok in 6.4s = 1.241 tok/s
+ACHILLES decode-detail: stall=3.4s io=34.7GB io_worker_time=14.6s per_stream_bw=2.38GB/s hit=0.532 (decode-only)
+--- ub2048b ---
+ACHILLES prefill: 2697 tok in 106.8s = 25.25 tok/s
+ACHILLES decode:  8 tok in 6.4s = 1.241 tok/s
+ACHILLES decode-detail: stall=3.4s io=34.7GB io_worker_time=14.4s per_stream_bw=2.41GB/s hit=0.532 (decode-only)
+DONE

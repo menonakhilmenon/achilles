@@ -1,0 +1,8 @@
+--- base ---
+ACHILLES decode:  128 tok in 16.3s = 7.874 tok/s
+ACHILLES decode-detail: stall=3.5s io=15.2GB io_worker_time=6.0s per_stream_bw=2.54GB/s hit=0.963 (decode-only)
+OUTPUT:  sparsity helps.
+--- mtp3 ---
+FAILED: core-dump
+0.10.582.731 I arena: MTP self-drafting enabled, depth 3 (nextn layers: 1)
+DONE

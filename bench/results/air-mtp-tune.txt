@@ -1,0 +1,17 @@
+--- base ---
+ACHILLES decode:  128 tok in 16.2s = 7.897 tok/s
+OUTPUT:  sparsity helps.
+--- d3-p06 ---
+ACHILLES spec: tried=0 accepted=0 (0%)
+ACHILLES decode:  128 tok in 16.4s = 7.782 tok/s
+OUTPUT:  sparsity helps.
+--- d3-p04 ---
+ACHILLES spec: tried=8 accepted=0 (0%)
+ACHILLES decode:  128 tok in 18.2s = 7.019 tok/s
+OUTPUT:  sparsity helps.
+ABORT d2-p06 44G
+ABORT d4-p06 44G
+ABORT d3-p08 44G
+ABORT base2 44G
+TOKEN_IDENTICAL base vs d3-p06
+TUNE_DONE

@@ -43,6 +43,7 @@
 #include <string>
 #include <thread>
 #include <chrono>
+#include <climits>
 #include <vector>
 
 extern bool g_no_uring;  // fwd (defined after arena)
@@ -725,6 +726,12 @@ static bool load_shadow_idx(int n_layer, int n_expert) {
 
 static bool load_meta(const std::string &model_path) {
     g_ar.paths = shard_paths(model_path);
+    // /proc/self/maps shows RESOLVED paths; canonicalize so symlinked model
+    // dirs (e.g. models/ -> the Gen5 mount) still match their mappings
+    for (auto & p : g_ar.paths) {
+        char buf[PATH_MAX];
+        if (realpath(p.c_str(), buf)) p = buf;
+    }
     LOG_INF("arena: %zu shard(s)\n", g_ar.paths.size());
 
     bool have_kv = false;
@@ -1267,7 +1274,9 @@ int main(int argc, char ** argv) {
         }
         n_past += 1 + n_acc;
         if (g_spec_ctx) {
-            common_speculative_accept(g_spec_ctx, 0, (uint16_t) n_acc);
+            if (!draft.empty()) {  // accept() asserts if no impl drafted this step
+                common_speculative_accept(g_spec_ctx, 0, (uint16_t) n_acc);
+            }
             llama_memory_seq_rm(llama_get_memory(g_ctx_dft), 0, n_past, -1);
         }
     }

@@ -698,6 +698,30 @@ techniques ("eager processing"). Research + three measured experiments:
 grave. Bursts are mitigated to the extent this drive's command model allows;
 the rest is Gen5.**
 
+### 29. Gen5 drive installed: decode 1.44, prefill 25.1 — both walls relocated
+
+Samsung 9100 PRO 1TB (Gen5 x4, 13.2 GB/s read measured). Migration: shards
+copied in 63 s, shadow regenerated on-drive in 4 min, models/ symlinked
+(arena now realpath()s shard paths — /proc/self/maps shows resolved paths,
+so symlinked model dirs previously matched nothing). Token-identity gate
+passed on the new drive before any benchmark.
+
+| GLM-5.2 | Gen4 (final) | **Gen5** | naive× |
+|---|---|---|---|
+| decode (96 tok, b32) | 1.146 | **1.443** (triple 1.421/1.422/1.422 at b30) | **4.8×** |
+| prefill 2697 tok, ub2048 | 22.4 | **25.1** | **~50×** |
+| post-prefill decode | 0.98 | 1.24 | |
+
+The round anatomy validated its own model: avg round 7.05 → 4.40 ms —
+the ~2.7 ms transfer term halved on cue, the ~1.7 ms fixed tail didn't.
+**Decode's next wall is NVMe latency + RAM compute, not bandwidth.**
+Prefill barely moved because ub2048 already left the Gen4 drive 45% idle:
+it is now CPU-compute-bound (31% drive utilization) — its endgame here.
+MTP spec re-checked on Gen5: 1.385 vs 1.42 plain — §24 verdict stands.
+
+Pending when the +32 GB RAM arrives: budget re-sweep (b56-60 → hit ~.77
+should put decode ~1.7-1.8), and the Air MTP revival program (task #26).
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
