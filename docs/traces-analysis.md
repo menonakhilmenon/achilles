@@ -646,6 +646,24 @@ Each ubatch sweeps the full expert store; fewer, larger ubatches:
 
 GTT held throughout (pages_limit fix); envelope swap-0 clean.
 
+### 26. The decode round, fully dissected: 74% of drive physics, case closed
+
+Instrumented every demand round (handoff, demand-IO, per-round stall) and ran
+four targeted experiments, all token-identity-gated:
+
+| experiment | decode | verdict |
+|---|---|---|
+| fetch re-sweep 4/6/8 under uring+shadow | 1.065/1.014/0.939 | fetch=2 stands; bytes still rule |
+| prefetch-yield (drive queue clears for demand rounds) | 1.107 | +1% kept |
+| demand fan-out (1 expert/worker, was 4 serialized) | **1.116** | +1.5% kept |
+| 2 MB demand sub-reads (deeper NVMe QD) | 1.075 | reverted; command overhead > QD gain |
+
+Round anatomy at the end: handoff 0.01 ms (software is free), ~7.3 ms/round
+for ~35 MB of missed experts = **74% of the drive's absolute 6.5 GB/s**.
+The stall is bandwidth at round granularity; there is no software left in it.
+Decode on this hardware: **1.12 tok/s, measured to its wall from two
+directions.** Gen5 moves the wall; nothing else does.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity

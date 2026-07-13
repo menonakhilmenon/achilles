@@ -80,7 +80,7 @@ struct arena {
     std::mutex mu;
     std::condition_variable cv;
 
-    struct req { int layer, expert, prio; };
+    struct req { int layer, expert, prio; std::chrono::steady_clock::time_point t_enq; };
     std::deque<req> q;
     std::atomic<bool> stop{false};
     std::vector<std::thread> workers;
@@ -111,10 +111,13 @@ struct arena {
 
     std::atomic<uint64_t> n_prefetch{0}, n_evict{0}, n_hit{0}, n_miss{0}, n_demand{0}, n_uring{0}, n_fallback{0};
     std::atomic<uint64_t> stall_ns{0}, io_bytes{0}, io_ns{0};  // time attribution
+    std::atomic<uint64_t> handoff_ns{0}, n_rounds{0}, demand_io_ns{0};  // round dissection
+    std::atomic<int> demand_active{0};  // prefetch yields the NVMe queue to demand rounds
     uint64_t snap[10] = {0};
     void snapshot() {
         snap[0] = stall_ns; snap[1] = io_bytes; snap[2] = io_ns;
         snap[3] = n_hit; snap[4] = n_miss; snap[5] = n_demand; snap[6] = n_prefetch;
+        snap[7] = handoff_ns; snap[8] = n_rounds; snap[9] = demand_io_ns;
     }
 
     int idx(int l, int e) const { return l * n_expert + e; }
@@ -251,8 +254,11 @@ struct arena {
             {
                 std::unique_lock<std::mutex> lk(mu);
                 cv.wait(lk, [&] {
-                    return stop.load() ||
-                           (!q.empty() && (!demand_only || q.front().prio == 0));
+                    if (stop.load()) return true;
+                    if (q.empty()) return false;
+                    if (q.front().prio == 0) return true;          // demands always go
+                    if (demand_only) return false;                  // reserved: demand only
+                    return demand_active.load() == 0;               // prefetch yields to rounds
                 });
                 if (stop) break;
                 // backpressure: real footprint = resident + not-yet-dropped;
@@ -264,8 +270,11 @@ struct arena {
                 });
                 if (stop) break;
                 jcv.notify_one();
-                while (nb < WORKER_BATCH && !q.empty() &&
+                // demands fan out 1-per-worker (parallel NVMe streams for the
+                // blocked layer); prefetch batches deep for throughput
+                while (nb < (nb > 0 && batch[0].prio == 0 ? 1 : WORKER_BATCH) && !q.empty() &&
                        (!demand_only || q.front().prio == 0) &&
+                       (q.front().prio == 0 || demand_active.load() == 0) &&
                        (nb == 0 || q.front().prio == batch[0].prio)) {
                     std::pop_heap(q.begin(), q.end(), [](const req &a, const req &b) { return a.prio > b.prio; });
                     req r = q.back();
@@ -273,6 +282,10 @@ struct arena {
                     const int i = idx(r.layer, r.expert);
                     if (valid[i] || inflight[i]) continue;
                     inflight[i] = 1;
+                    if (r.prio == 0) {
+                        handoff_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - r.t_enq).count();
+                    }
                     batch[nb++] = r;
                 }
             }
@@ -356,8 +369,10 @@ struct arena {
             }
             io_uring_cqe_seen(ring, cqe);
         }
-        io_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+        const uint64_t dt = std::chrono::duration_cast<std::chrono::nanoseconds>(
                      std::chrono::steady_clock::now() - t0).count();
+        io_ns += dt;
+        if (batch[0].prio == 0) demand_io_ns += dt;
         // experts whose every range fell back to buffered still need completion
         for (int b = 0; b < nb; b++) {
             bool had_sqe = false;
@@ -373,7 +388,7 @@ struct arena {
         const int i = idx(l, e);
         if (valid[i] || inflight[i]) return;
         for (const auto &r : q) if (r.layer == l && r.expert == e) return;
-        q.push_back({l, e, prio});
+        q.push_back({l, e, prio, std::chrono::steady_clock::now()});
         std::push_heap(q.begin(), q.end(), [](const req &a, const req &b) { return a.prio > b.prio; });
         if (prio == 0) cv.notify_all(); else cv.notify_one();
     }
@@ -406,7 +421,7 @@ struct arena {
                         bool dup = false;
                         for (const auto &r : q) if (r.layer == l && r.expert == e) { dup = true; break; }
                         if (!dup) {
-                            q.push_back({l, e, 0});
+                            q.push_back({l, e, 0, std::chrono::steady_clock::now()});
                             std::push_heap(q.begin(), q.end(),
                                            [](const req &a, const req &b) { return a.prio > b.prio; });
                             queued = true;
@@ -431,6 +446,7 @@ struct arena {
         }
         if (queued) cv.notify_all();
         // block until every expert this layer needs is loaded
+        demand_active.fetch_add(1);
         const auto ts0 = std::chrono::steady_clock::now();
         for (;;) {
             bool pending = false;
@@ -446,8 +462,12 @@ struct arena {
             if (!pending) break;
             std::this_thread::yield();
         }
-        stall_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+        const uint64_t st = std::chrono::duration_cast<std::chrono::nanoseconds>(
                         std::chrono::steady_clock::now() - ts0).count();
+        stall_ns += st;
+        if (st > 200000) n_rounds++;  // >0.2ms = a real demand round
+        demand_active.fetch_sub(1);
+        cv.notify_all();  // wake prefetch workers that yielded
     }
 
     // ---- gate-ahead prediction ----
@@ -1278,6 +1298,15 @@ int main(int argc, char ** argv) {
                 "per_stream_bw=%.2fGB/s hit=%.3f (decode-only)\n",
                 d_stall, d_gb, d_ios, d_ios > 0 ? d_gb / d_ios : 0.0,
                 d_hit + d_miss ? (double) d_hit / (d_hit + d_miss) : 0.0);
+        const uint64_t dr = g_ar.n_rounds - g_ar.snap[8];
+        const double d_ho = (g_ar.handoff_ns - g_ar.snap[7]) / 1e9;
+        const double d_dio = (g_ar.demand_io_ns - g_ar.snap[9]) / 1e9;
+        const uint64_t d_dem = g_ar.n_demand - g_ar.snap[5];
+        fprintf(stderr, "ACHILLES rounds: n=%" PRIu64 " avg_stall=%.2fms handoff_avg=%.2fms "
+                "demand_io_avg=%.2fms demands=%" PRIu64 "\n",
+                dr, dr ? d_stall * 1000.0 / dr : 0.0,
+                d_dem ? d_ho * 1000.0 / d_dem : 0.0,
+                dr ? d_dio * 1000.0 / dr : 0.0, d_dem);
     }
     fprintf(stderr, "OUTPUT: %.240s\n", text.c_str());
     llama_sampler_free(smpl);

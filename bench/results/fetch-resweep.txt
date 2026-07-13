@@ -1,0 +1,11 @@
+--- fetch=4 ---
+ACHILLES decode:  64 tok in 60.1s = 1.065 tok/s
+ACHILLES decode-detail: stall=36.3s io=239.9GB io_worker_time=68.8s per_stream_bw=3.49GB/s hit=0.690 (decode-only)
+--- fetch=6 ---
+ACHILLES decode:  64 tok in 63.1s = 1.014 tok/s
+ACHILLES decode-detail: stall=38.6s io=278.0GB io_worker_time=89.6s per_stream_bw=3.10GB/s hit=0.743 (decode-only)
+--- fetch=8 ---
+ACHILLES decode:  64 tok in 68.2s = 0.939 tok/s
+ACHILLES decode-detail: stall=42.3s io=333.5GB io_worker_time=122.0s per_stream_bw=2.73GB/s hit=0.780 (decode-only)
+--- fetch=2 reference: 1.099 (io 217GB, hit .629, stall 34.8s) ---
+DONE
