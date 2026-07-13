@@ -22,6 +22,7 @@
 //        --workers 6 [--no-pager] [--stats]
 #include "arg.h"
 #include "common.h"
+#include "speculative.h"
 #include "log.h"
 #include "llama.h"
 #include "ggml.h"
@@ -463,6 +464,9 @@ static std::string g_ppl_file;
 static int g_ppl_n = 600;
 static std::string g_gate;  // wait for this file post-install (cgroup staging)
 static int g_spec = 0;
+static int g_spec_mtp = 0;   // MTP self-drafting depth (blk.78 nextn head)
+static common_speculative * g_spec_ctx = nullptr;
+static llama_context * g_ctx_dft = nullptr;
 static int g_pstream = 1;  // prefill layer-streaming (0 = off)  // n-gram lookup speculation depth (0 = off)
 static FILE * g_dump = nullptr;  // trace dump: 'H' l n h[fp32*n] | 'T' l k ids[i32*k]
 static std::mutex g_dump_mu;
@@ -830,6 +834,7 @@ int main(int argc, char ** argv) {
             }
         }
         else if (a == "--spec") g_spec = atoi(argv[++i]);
+        else if (a == "--spec-mtp") g_spec_mtp = atoi(argv[++i]);
         else if (a == "--pstream") g_ar.pstream = atoi(argv[++i]);
         else if (a == "--dump") g_dump = fopen(argv[++i], "wb");
         else if (a == "--shadow") g_shadow_prefix = argv[++i];
@@ -858,6 +863,11 @@ int main(int argc, char ** argv) {
     common_params params;
     common_init();
     if (!common_params_parse((int) args.size(), args.data(), params, LLAMA_EXAMPLE_COMMON)) return 1;
+    // The arena's MAP_FIXED replacement requires tensor bytes to stay at their
+    // mmap addresses. CPU weight repacking copies tensors into anonymous
+    // buffers - breaks that invariant AND tries to materialize 218 GiB of
+    // experts in RAM under -ngl 0 (the three 2026-07-13 system crashes).
+    params.no_extra_bufts = true;
     llama_backend_init();
     llama_numa_init(params.numa);
 
@@ -999,6 +1009,21 @@ int main(int argc, char ** argv) {
     std::vector<llama_token> toks =
         common_tokenize(lctx, params.prompt, llama_vocab_get_add_bos(vocab), true);
 
+    static common_speculative_init_result_ptr spec_res;  // owns the MTP draft context
+    if (g_spec_mtp > 0) {
+        params.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_MTP };
+        params.speculative.draft.n_max = g_spec_mtp;
+        params.speculative.draft.n_min = 0;
+        spec_res = common_speculative_init_from_params(params, model, lctx);
+        g_ctx_dft = spec_res ? spec_res->context() : nullptr;
+        if (!g_ctx_dft) { LOG_ERR("arena: MTP draft context failed (no nextn layers?)\n"); return 1; }
+        params.speculative.draft.ctx_tgt = lctx;
+        params.speculative.draft.ctx_dft = g_ctx_dft;
+        g_spec_ctx = common_speculative_init(params.speculative, 1);
+        common_speculative_begin(g_spec_ctx, 0, toks);
+        LOG_INF("arena: MTP self-drafting enabled, depth %d (nextn layers: %d)\n",
+                g_spec_mtp, (int) llama_model_n_layer_nextn(model));
+    }
     const double t_p0 = ggml_time_us() / 1e6;
     {   // chunked prefill: llama_decode caps batches at n_batch tokens
         const int nb = (int) llama_n_batch(lctx);
@@ -1006,6 +1031,9 @@ int main(int argc, char ** argv) {
             const int n = (int) std::min(toks.size() - off, (size_t) nb);
             llama_batch pb = llama_batch_get_one(toks.data() + off, n);
             if (llama_decode(lctx, pb)) { LOG_ERR("prefill chunk failed\n"); return 1; }
+            if (g_spec_ctx && !common_speculative_process(g_spec_ctx, pb)) {
+                LOG_ERR("arena: MTP process failed on prefill chunk\n"); return 1;
+            }
         }
     }
     const double t_p1 = ggml_time_us() / 1e6;
@@ -1044,7 +1072,7 @@ int main(int argc, char ** argv) {
     };
     llama_memory_t mem = llama_get_memory(lctx);
     llama_pos n_past = (llama_pos) toks.size();
-    llama_batch sb = llama_batch_init(g_spec + 1, 0, 1);
+    llama_batch sb = llama_batch_init(std::max(g_spec, g_spec_mtp) + 1, 0, 1);
     bool have_pending = false;
     llama_token pending = 0;
     uint64_t n_spec_acc = 0, n_spec_try = 0;
@@ -1056,7 +1084,17 @@ int main(int argc, char ** argv) {
         text += common_token_to_piece(lctx, t0);
         hist.push_back(t0);
         gen++;
-        std::vector<llama_token> draft = g_spec > 0 ? ngram_draft(g_spec) : std::vector<llama_token>{};
+        std::vector<llama_token> draft;
+        if (g_spec_ctx) {
+            hist.pop_back();  // draft API wants the prompt WITHOUT id_last
+            common_speculative_get_draft_params(g_spec_ctx, 0) = {
+                /*drafting*/ true, /*n_max*/ -1, /*n_past*/ n_past, /*id_last*/ t0,
+                /*prompt*/ &hist, /*result*/ &draft };
+            common_speculative_draft(g_spec_ctx);
+            hist.push_back(t0);
+        } else if (g_spec > 0) {
+            draft = ngram_draft(g_spec);
+        }
         sb.n_tokens = 1 + (int) draft.size();
         sb.token[0] = t0; sb.pos[0] = n_past; sb.n_seq_id[0] = 1; sb.seq_id[0][0] = 0;
         sb.logits[0] = true;
@@ -1065,6 +1103,7 @@ int main(int argc, char ** argv) {
             sb.n_seq_id[i + 1] = 1; sb.seq_id[i + 1][0] = 0; sb.logits[i + 1] = true;
         }
         if (llama_decode(lctx, sb)) break;
+        if (g_spec_ctx && !common_speculative_process(g_spec_ctx, sb)) break;
         int n_acc = 0;
         for (size_t i = 0; i <= draft.size() && gen < n_gen; i++) {
             llama_token t = llama_sampler_sample(smpl, lctx, (int) i);
@@ -1083,10 +1122,14 @@ int main(int argc, char ** argv) {
             llama_memory_seq_rm(mem, 0, n_past + 1 + n_acc, -1);
         }
         n_past += 1 + n_acc;
+        if (g_spec_ctx) {
+            common_speculative_accept(g_spec_ctx, 0, (uint16_t) n_acc);
+            llama_memory_seq_rm(llama_get_memory(g_ctx_dft), 0, n_past, -1);
+        }
     }
     const double t_g1 = ggml_time_us() / 1e6;
     llama_batch_free(sb);
-    if (g_spec > 0) {
+    if (g_spec > 0 || g_spec_mtp > 0) {
         fprintf(stderr, "ACHILLES spec: tried=%" PRIu64 " accepted=%" PRIu64 " (%.0f%%)\n",
                 n_spec_try, n_spec_acc, n_spec_try ? 100.0 * n_spec_acc / n_spec_try : 0.0);
     }
