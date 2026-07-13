@@ -113,6 +113,7 @@ struct arena {
     std::atomic<uint64_t> n_prefetch{0}, n_evict{0}, n_hit{0}, n_miss{0}, n_demand{0}, n_uring{0}, n_fallback{0};
     std::atomic<uint64_t> stall_ns{0}, io_bytes{0}, io_ns{0};  // time attribution
     std::atomic<uint64_t> handoff_ns{0}, n_rounds{0}, demand_io_ns{0};  // round dissection
+    std::atomic<uint64_t> score_ns{0}, cb_ns{0};  // non-stall attribution
     std::atomic<int> demand_active{0};  // prefetch yields the NVMe queue to demand rounds
     uint64_t snap[10] = {0};
     void snapshot() {
@@ -504,6 +505,10 @@ struct arena {
     }
 
     void score_hidden(int l, const float *h) {
+        const auto t_sc0 = std::chrono::steady_clock::now();
+        struct scoped { const std::chrono::steady_clock::time_point t0; std::atomic<uint64_t> & acc;
+            ~scoped() { acc += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - t0).count(); } } sc{t_sc0, score_ns};
         // stages: near (delta, d3 probes or gate-ahead) + far (8, d8 probes)
         struct stage { int d; const std::vector<float> * W; };
         stage stages[2];
@@ -522,9 +527,18 @@ struct arena {
                 if (W.empty()) continue;
                 std::vector<std::pair<float, int>> sc(n_expert);
                 for (int e = 0; e < n_expert; e++) {
-                    float dot = 0;
                     const float *w = &W[(size_t) e * n_embd];
-                    for (int j = 0; j < n_embd; j++) dot += w[j] * h[j];
+                    // 8-way accumulator: breaks the loop-carried reduction dep so
+                    // -march=native vectorizes into FMAs (was a scalar ~1 MAC/cyc
+                    // hot loop, 95ms/tok). Scoring only steers prefetch/eviction —
+                    // never the matmul — so reordering this sum is token-neutral.
+                    float acc[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+                    int j = 0;
+                    for (; j + 8 <= n_embd; j += 8)
+                        for (int u = 0; u < 8; u++) acc[u] += w[j + u] * h[j + u];
+                    for (; j < n_embd; j++) acc[0] += w[j] * h[j];
+                    float dot = ((acc[0] + acc[1]) + (acc[2] + acc[3])) +
+                                ((acc[4] + acc[5]) + (acc[6] + acc[7]));
                     if (!probe_mode && sigmoid_bias) {
                         dot = 1.0f / (1.0f + expf(-dot));
                         if (!rb[l + d].empty()) dot += rb[l + d][e];
@@ -578,6 +592,7 @@ static bool g_on = true;
 static std::string g_ppl_file;
 static int g_ppl_n = 600;
 static std::string g_gate;  // wait for this file post-install (cgroup staging)
+static uint64_t g_sample_ns = 0, g_decode_ns = 0;
 static int g_spec = 0;
 static int g_spec_mtp = 0;   // MTP self-drafting depth (blk.78 nextn head)
 static float g_spec_pmin = 0.0f;  // only draft tokens above this probability
@@ -608,6 +623,10 @@ static bool cb_arena(struct ggml_tensor * t, bool ask, void *) {
     }
     if (!g_on) return true;
     if (ggml_nelements(t) == 0) return true;
+    const auto t_cb0 = std::chrono::steady_clock::now();
+    struct cbscope { const std::chrono::steady_clock::time_point t0;
+        ~cbscope() { g_ar.cb_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - t0).count(); } } cbsc{t_cb0};
     if (is_sel && g_ar.bias_strength > 0.f && t->type == GGML_TYPE_F32) {
         const int l = atoi(t->name + 21);
         if (l >= 0 && l < g_ar.n_layer && g_ar.pageable[l]) {
@@ -1226,7 +1245,10 @@ int main(int argc, char ** argv) {
     uint64_t n_spec_acc = 0, n_spec_try = 0;
     const double t_g0 = ggml_time_us() / 1e6;
     while (gen < n_gen) {
+        const auto t_s0 = std::chrono::steady_clock::now();
         llama_token t0 = have_pending ? pending : llama_sampler_sample(smpl, lctx, -1);
+        g_sample_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - t_s0).count();
         have_pending = false;
         if (llama_vocab_is_eog(vocab, t0)) break;
         text += common_token_to_piece(lctx, t0);
@@ -1253,7 +1275,10 @@ int main(int argc, char ** argv) {
             sb.token[i + 1] = draft[i]; sb.pos[i + 1] = n_past + 1 + (llama_pos) i;
             sb.n_seq_id[i + 1] = 1; sb.seq_id[i + 1][0] = 0; sb.logits[i + 1] = true;
         }
+        const auto t_d0 = std::chrono::steady_clock::now();
         if (llama_decode(lctx, sb)) break;
+        g_decode_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - t_d0).count();
         if (g_spec_ctx && !common_speculative_process(g_spec_ctx, sb)) break;
         int n_acc = 0;
         for (size_t i = 0; i <= draft.size() && gen < n_gen; i++) {
@@ -1315,6 +1340,16 @@ int main(int argc, char ** argv) {
                 "per_stream_bw=%.2fGB/s hit=%.3f (decode-only)\n",
                 d_stall, d_gb, d_ios, d_ios > 0 ? d_gb / d_ios : 0.0,
                 d_hit + d_miss ? (double) d_hit / (d_hit + d_miss) : 0.0);
+        {
+            const double per = gen > 0 ? 1e-6 / gen : 0;
+            const double d_dec = g_decode_ns * per, d_stall2 = (g_ar.stall_ns - g_ar.snap[0]) * per;
+            const double d_sc = g_ar.score_ns * per, d_cb = g_ar.cb_ns * per, d_sm = g_sample_ns * per;
+            const double wall = (t_g1 - t_g0) * 1000.0 / std::max(gen, 1);
+            fprintf(stderr, "ACHILLES profile(ms/tok): wall=%.1f decode=%.1f stall=%.1f "
+                    "score=%.1f cb_total=%.1f sample=%.1f graph_other=%.1f loop_other=%.1f\n",
+                    wall, d_dec, d_stall2, d_sc, d_cb, d_sm,
+                    d_dec - d_stall2 - d_cb, wall - d_dec - d_sm);
+        }
         const uint64_t dr = g_ar.n_rounds - g_ar.snap[8];
         const double d_ho = (g_ar.handoff_ns - g_ar.snap[7]) / 1e9;
         const double d_dio = (g_ar.demand_io_ns - g_ar.snap[9]) / 1e9;

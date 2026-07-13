@@ -722,6 +722,46 @@ MTP spec re-checked on Gen5: 1.385 vs 1.42 plain — §24 verdict stands.
 Pending when the +32 GB RAM arrives: budget re-sweep (b56-60 → hit ~.77
 should put decode ~1.7-1.8), and the Air MTP revival program (task #26).
 
+### 30. The token budget, fully attributed: the scorer was a scalar hot loop
+
+Chased the "~250 ms/token unattributed" block from §29 with per-token
+instrumentation (`ACHILLES profile` line: wall / decode / stall / score /
+cb_total). The old mental model — stall + ~130 ms RAM compute + ~250 ms
+mystery — resolved cleanly. At Gen5, budget 32, shadow, reuse, the 688 ms
+token was:
+
+| component | ms/tok | % | where |
+|---|---|---|---|
+| stall (demand IO wait) | 315 | 46% | in callback, compute thread |
+| gate-ahead scoring | 95 | 14% | in callback, compute thread |
+| residual callback (GPU readbacks, eviction scan, load-submit) | 92 | 13% | compute thread |
+| graph compute (matmul / attn / GPU) | 185 | 27% | outside callback |
+
+The mystery was never one block — it was scoring + callback overhead +
+an underestimate of graph compute. The surprise: **scoring cost 95 ms.**
+`score_hidden`'s inner product was a scalar reduction —
+`for j: dot += w[j]*h[j]` — whose loop-carried FP dependency blocks
+auto-vectorization even at `-O3 -march=native`, so it ran ~1 MAC/cyc over
+~300M MACs/token (76 layers × stages × 256 experts × 5120 dims).
+
+Fix: an 8-way accumulator array, which the compiler folds into vector FMAs.
+**Safe by construction** — scoring only steers prefetch and eviction, never
+the matmul, so reordering the sum can't change a token (the validity
+invariant already guarantees output regardless of prefetch timing). Measured,
+token-identical:
+
+| | before | after |
+|---|---|---|
+| score ms/tok | 94.8 | **45.4** (2.1×) |
+| wall ms/tok | 687.8 | **638.5** |
+| **decode tok/s** | 1.454 | **1.566** (+7.7%) |
+
+Scoring is now near its ~20-30 ms/tok memory-bandwidth floor (probe weights
+re-read per layer). Remaining non-stall targets: the 92 ms residual callback
+(each `ggml_backend_tensor_get` for topk/norm forces a scheduler fence —
+GPU↔CPU sync bubbles) and the 185 ms graph compute. Stall (315 ms) stays
+the bytes-moved floor from §26/§29.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity

@@ -9,7 +9,7 @@ serves the misses — with a predictor steering both prefetch and eviction.
 
 | GLM-5.2 UD-Q2_K_XL | naive (kernel mmap) | **achilles-arena, full profile** |
 |---|---|---|
-| decode | 0.30 tok/s | **1.44 tok/s** — 4.8× (Gen5 SSD, §29; 1.15 on Gen4) |
+| decode | 0.30 tok/s | **1.57 tok/s** — 5.2× (Gen5 SSD + vectorized scorer, §30; 1.15 on Gen4) |
 | prefill (~2700-token prompt) | ~0.5 tok/s | **25.1 tok/s** — ~50× (layer-streaming + shadow + io_uring + full-batch ubatches) |
 
 Every number cold, controlled, token-identity-gated. Polite profile (desktop
