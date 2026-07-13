@@ -480,7 +480,10 @@ static bool cb_arena(struct ggml_tensor * t, bool ask, void *) {
     // single token means ONE ROW total, not ne[1]==1; and the last layer's
     // output-row slice can be ZERO rows on non-final prefill ubatches
     if (ask) {
-        return g_on && (is_topk || (is_norm && ggml_nrows(t) == 1) ||
+        // norms: single token (decode) or small spec-verify batches; big
+        // prefill ubatches stay excluded (wrong hidden + zero-row last layer)
+        const int64_t nr = is_norm ? ggml_nrows(t) : 0;
+        return g_on && (is_topk || (is_norm && nr >= 1 && nr <= 8) ||
                         (is_sel && g_ar.bias_strength > 0.f));
     }
     if (!g_on) return true;
@@ -530,24 +533,29 @@ static bool cb_arena(struct ggml_tensor * t, bool ask, void *) {
             fwrite(ids.data(), 4, (size_t) k * n_tokens, g_dump);
         }
         g_ar.on_topk(l, ids.data(), k, n_tokens);
-    } else if (is_norm && ggml_nrows(t) == 1 && t->type == GGML_TYPE_F32) {
+    } else if (is_norm && ggml_nrows(t) >= 1 && ggml_nrows(t) <= 8 && t->type == GGML_TYPE_F32) {
         const int l = atoi(strchr(t->name, '-') + 1);
+        const int nr = (int) ggml_nrows(t);
         if (getenv("ACHILLES_DBG_CB")) {
             fprintf(stderr, "CB %s ne=[%lld,%lld,%lld,%lld] nb=[%zu,%zu,%zu,%zu] nbytes=%zu type=%d\n",
                     t->name, (long long)t->ne[0], (long long)t->ne[1], (long long)t->ne[2], (long long)t->ne[3],
                     t->nb[0], t->nb[1], t->nb[2], t->nb[3], ggml_nbytes(t), (int)t->type);
         }
         static std::vector<float> h;
-        h.resize(t->ne[0]);
-        ggml_backend_tensor_get(t, h.data(), 0, t->ne[0] * sizeof(float));
-        if (g_dump) {
+        h.resize((size_t) t->ne[0] * nr);
+        ggml_backend_tensor_get(t, h.data(), 0, h.size() * sizeof(float));
+        if (g_dump && nr == 1) {
             std::lock_guard<std::mutex> lk(g_dump_mu);
             fputc('H', g_dump);
             int32_t hdr[2] = {l, (int32_t) t->ne[0]};
             fwrite(hdr, 4, 2, g_dump);
             fwrite(h.data(), 4, t->ne[0], g_dump);
         }
-        g_ar.submit_hidden(l, h.data(), (int) t->ne[0]);
+        // spec verify batches: score every drafted token's hidden -> the plan
+        // covers all in-flight trajectories, not just the committed token
+        for (int r = 0; r < nr; r++) {
+            g_ar.submit_hidden(l, h.data() + (size_t) r * t->ne[0], (int) t->ne[0]);
+        }
     }
     return true;
 }
@@ -567,6 +575,33 @@ static std::vector<std::string> shard_paths(const std::string &p) {
         out.push_back(s);
     }
     return out;
+}
+
+// expert-major shadow file (scripts/repack_shadow.py): per (l,e,proj) offsets
+static std::string g_shadow_prefix;
+static std::vector<uint64_t> g_shadow_off, g_shadow_len;  // [l*nE*3 + e*3 + pi]
+static int g_shadow_fi = -1;
+struct shadow_src { off_t base; size_t slice; int pi; };   // per (layer, push-order proj)
+static std::vector<std::vector<shadow_src>> g_shadow_map;
+
+static bool load_shadow_idx(int n_layer, int n_expert) {
+    FILE * f = fopen((g_shadow_prefix + ".idx").c_str(), "rb");
+    if (!f) { LOG_ERR("arena: shadow idx missing\n"); return false; }
+    char magic[4]; uint32_t ver, nl, ne;
+    if (fread(magic, 1, 4, f) != 4 || memcmp(magic, "ASHD", 4) ||
+        fread(&ver, 4, 1, f) != 1 || fread(&nl, 4, 1, f) != 1 || fread(&ne, 4, 1, f) != 1 ||
+        (int) nl != n_layer || (int) ne != n_expert) {
+        LOG_ERR("arena: shadow idx header mismatch\n"); fclose(f); return false;
+    }
+    const size_t n = (size_t) n_layer * n_expert * 3;
+    g_shadow_off.resize(n); g_shadow_len.resize(n);
+    for (size_t i = 0; i < n; i++) {
+        if (fread(&g_shadow_off[i], 8, 1, f) != 1 || fread(&g_shadow_len[i], 8, 1, f) != 1) {
+            LOG_ERR("arena: shadow idx truncated\n"); fclose(f); return false;
+        }
+    }
+    fclose(f);
+    return true;
 }
 
 static bool load_meta(const std::string &model_path) {
@@ -622,6 +657,9 @@ static bool load_meta(const std::string &model_path) {
                 for (int e = 0; e < g_ar.n_expert; e++) {
                     g_ar.ranges[l][e].push_back({nullptr, (int) fi, base + (off_t) (slice * e), slice});
                 }
+                if ((int) g_shadow_map.size() < g_ar.n_layer) g_shadow_map.resize(g_ar.n_layer);
+                g_shadow_map[l].push_back({base, slice,
+                    !strcmp(what, "ffn_gate_exps") ? 0 : !strcmp(what, "ffn_up_exps") ? 1 : 2});
                 g_ar.bytes_of[l] += slice;
             } else if (!strcmp(what, "ffn_gate_inp")) {
                 const size_t n = ggml_nelements(t);
@@ -722,6 +760,35 @@ static bool install_arena() {
     for (int fd : g_ar.fds) {
         posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED); // dense upload leftovers
     }
+    if (!g_shadow_prefix.empty()) {  // retarget loads at the expert-major shadow
+        if (!load_shadow_idx(g_ar.n_layer, g_ar.n_expert)) return false;
+        g_shadow_fi = (int) g_ar.fds.size();
+        g_ar.paths.push_back(g_shadow_prefix + ".bin");
+        g_ar.fds.push_back(open(g_ar.paths.back().c_str(), O_RDONLY));
+        g_ar.fds_direct.push_back(open(g_ar.paths.back().c_str(), O_RDONLY | O_DIRECT));
+        if (g_ar.fds.back() < 0) { LOG_ERR("arena: shadow bin missing\n"); return false; }
+        size_t remapped = 0;
+        for (int l = 0; l < g_ar.n_layer; l++) {
+            if (!g_ar.pageable[l] || l >= (int) g_shadow_map.size()) continue;
+            for (size_t p = 0; p < g_shadow_map[l].size(); p++) {
+                const auto &src = g_shadow_map[l][p];
+                for (int e = 0; e < g_ar.n_expert; e++) {
+                    auto &rg = g_ar.ranges[l][e][p];
+                    if (!rg.len || !rg.addr) continue;
+                    const size_t ii = ((size_t) l * g_ar.n_expert + e) * 3 + src.pi;
+                    if (g_shadow_len[ii] != src.slice) {
+                        LOG_ERR("arena: shadow len mismatch l=%d e=%d p=%d\n", l, e, src.pi);
+                        return false;
+                    }
+                    const off_t delta = rg.foff - (src.base + (off_t) (src.slice * e));
+                    rg.file = g_shadow_fi;
+                    rg.foff = (off_t) g_shadow_off[ii] + delta;
+                    remapped++;
+                }
+            }
+        }
+        LOG_INF("arena: shadow remap: %zu ranges -> %s.bin\n", remapped, g_shadow_prefix.c_str());
+    }
     LOG_INF("arena: replaced %.1f GiB with anonymous expert memory, budget %.1f GiB\n",
             replaced / (double) (1 << 30), g_ar.budget / (double) (1 << 30));
     return replaced > 0;
@@ -765,6 +832,7 @@ int main(int argc, char ** argv) {
         else if (a == "--spec") g_spec = atoi(argv[++i]);
         else if (a == "--pstream") g_ar.pstream = atoi(argv[++i]);
         else if (a == "--dump") g_dump = fopen(argv[++i], "wb");
+        else if (a == "--shadow") g_shadow_prefix = argv[++i];
         else if (a == "--probe") {
             FILE * pf = fopen(argv[++i], "rb");
             if (pf) {
