@@ -104,6 +104,7 @@ def main():
                 if path not in fouts:
                     fouts[path] = open(path, "rb")
                 f = fouts[path]
+                fsize = Path(path).stat().st_size
                 for e in range(ne):
                     so, ln = idx[(l, e, pi)]
                     if ln == 0:
@@ -111,11 +112,18 @@ def main():
                     wlo, wlen = win[(l, e, pi)]
                     f.seek(wlo)
                     out.seek(so - ((foff + e * per) - wlo))
-                    left = wlen
+                    # the aligned-up window can extend past EOF on the file's
+                    # last tensor: read what exists, zero-fill the tail
+                    left = min(wlen, max(0, fsize - wlo))
+                    tail = wlen - left
                     while left:
                         buf = f.read(min(CHUNK, left))
+                        if not buf:
+                            raise IOError(f"short read at {wlo} ({path})")
                         out.write(buf)
                         left -= len(buf)
+                    if tail:
+                        out.write(b"\0" * tail)
                     written += ln
             if l % 8 == 0:
                 el = time.time() - t0

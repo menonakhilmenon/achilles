@@ -1,0 +1,4 @@
+09:34:52 qwen repack start
+09:35:01 qwen repack done
+09:35:40 QWEN TOKEN_IDENTICAL: ACHILLES decode:  64 tok in 5.2s = 12.348 tok/s || shadow: ACHILLES decode:  64 tok in 4.5s = 14.271 tok/s
+09:35:40 glm repack start (~2-3h)
