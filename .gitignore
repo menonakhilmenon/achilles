@@ -7,3 +7,10 @@ bench/ssdread
 bench/scratch.bin
 __pycache__/
 *.pyc
+
+# build artifacts (rebuild with ./build.sh)
+src/achilles-arena
+src/achilles-arena-old
+src/achilles-pager
+src/mtp_probe
+scripts/trace-moe
