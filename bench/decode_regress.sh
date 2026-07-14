@@ -6,7 +6,7 @@
 #   ngl99 : max offload (spills)    -> budget 30 (tonight's 0.64 baseline)
 #   repro : yesterday's exact staged config (-n 24, pstream 0, lru, ngl 99)
 set -u
-cd /var/home/akhil/achilles
+cd "$(dirname "$0")/.."
 . bench/vkdev.sh
 M=models/glm52-gguf/UD-Q2_K_XL/GLM-5.2-UD-Q2_K_XL-00001-of-00007.gguf
 T=${CLAUDE_TMP:-/home/akhil/.claude/jobs/34438cab/tmp}
@@ -20,7 +20,7 @@ run_cfg() {
   UNIT=achilles-glm-regress
   systemctl --user reset-failed $UNIT 2>/dev/null
   LOG=$T/glm-regress-$name.log
-  systemd-run --user --unit $UNIT -p WorkingDirectory=/var/home/akhil/achilles \
+  systemd-run --user --unit $UNIT -p WorkingDirectory="$PWD" \
     -p MemoryHigh=44G -p MemoryMax=48G -p MemorySwapMax=2G -p IOWeight=50 \
     bash -c "GGML_VK_VISIBLE_DEVICES=$VKDEV exec src/achilles-arena -m '$M' \
       -p 'Explain how mixture-of-experts language models work, covering routing, expert specialization, and why sparsity helps.' \

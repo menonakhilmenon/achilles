@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Eviction policy A/B on GLM-5.2 decode, FULL profile: lru vs reuse.
 set -u
-cd /var/home/akhil/achilles
+cd "$(dirname "$0")/.."
 . bench/vkdev.sh
 M=models/glm52-gguf/UD-Q2_K_XL/GLM-5.2-UD-Q2_K_XL-00001-of-00007.gguf
 T=${CLAUDE_TMP:-/home/akhil/.claude/jobs/34438cab/tmp}
@@ -13,7 +13,7 @@ for pol in lru reuse; do
   UNIT=achilles-glm-pol
   systemctl --user reset-failed $UNIT 2>/dev/null
   LOG=$T/glm-pol-$pol.log
-  systemd-run --user --unit $UNIT -p WorkingDirectory=/var/home/akhil/achilles \
+  systemd-run --user --unit $UNIT -p WorkingDirectory="$PWD" \
     -p MemoryHigh=44G -p MemoryMax=48G -p MemorySwapMax=2G \
     bash -c "GGML_VK_VISIBLE_DEVICES=$VKDEV exec src/achilles-arena -m '$M' \
       -p 'Explain how mixture-of-experts language models work, covering routing, expert specialization, and why sparsity helps.' \

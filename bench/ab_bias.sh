@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Post-janitor bias A/B, detached-unit friendly. Results to bench/results/.
-cd /var/home/akhil/achilles
+cd "$(dirname "$0")/.."
 M=models/glm52-gguf/UD-Q2_K_XL/GLM-5.2-UD-Q2_K_XL-00001-of-00007.gguf
 P="Explain how mixture-of-experts language models work, covering routing, expert specialization, and why sparsity helps."
 OUT=bench/results/ab-bias-janitor.txt

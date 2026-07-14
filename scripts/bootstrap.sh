@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-shot local setup for the achilles stack. Idempotent — safe to re-run.
+# One-shot local setup for the llama-cpp-extended-vram stack. Idempotent — safe to re-run.
 #   1. build llama.cpp (Vulkan) at the pinned tag         [scripts/setup_llama.sh]
 #   2. compile src/achilles-arena against it              [./build.sh]
 #   3. create the Python venv for model downloads

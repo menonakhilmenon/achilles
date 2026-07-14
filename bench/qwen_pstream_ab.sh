@@ -4,7 +4,7 @@
 # Long prompt (~2300 tok) -> 2 prefill chunks; pstream 0 vs 1, 2 runs each,
 # model page cache evicted between runs; 1s cgroup memory sampler per run.
 set -u
-cd /var/home/akhil/achilles
+cd "$(dirname "$0")/.."
 . bench/vkdev.sh
 M=models/qwen3-30b-a3b-gguf/Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf
 T=${CLAUDE_TMP:-/home/akhil/.claude/jobs/34438cab/tmp}
@@ -18,7 +18,7 @@ for ps in 0 1 0 1; do
   UNIT=achilles-qwen-ab
   systemctl --user reset-failed $UNIT 2>/dev/null
   LOG=$T/qwen-ab-ps$ps-$RANDOM.log
-  systemd-run --user --unit $UNIT -p WorkingDirectory=/var/home/akhil/achilles \
+  systemd-run --user --unit $UNIT -p WorkingDirectory="$PWD" \
     -p MemoryHigh=20G -p MemoryMax=24G -p MemorySwapMax=1G -p Nice=10 -p IOWeight=10 \
     bash -c "GGML_VK_VISIBLE_DEVICES=$VKDEV exec src/achilles-arena -m '$M' -f '$T/longprompt.txt' \
       -n 8 -t 6 --budget-gib 5 --workers 4 --pstream $ps --stats > $LOG 2>&1"

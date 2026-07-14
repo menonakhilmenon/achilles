@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prefill layer-streaming A/B on GLM-5.2 with a long prompt (~600 tokens).
-cd /var/home/akhil/achilles
+cd "$(dirname "$0")/.."
 M=models/glm52-gguf/UD-Q2_K_XL/GLM-5.2-UD-Q2_K_XL-00001-of-00007.gguf
 OUT=bench/results/prefill-ab.txt
 : > "$OUT"

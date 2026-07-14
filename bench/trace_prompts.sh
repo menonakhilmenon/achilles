@@ -3,7 +3,7 @@
 # One arena run per prompt, --dump to traces/qwen-prompts/pNN.bin.
 # Warm page cache is fine — traces record routing, not IO.
 set -u
-cd /var/home/akhil/achilles
+cd "$(dirname "$0")/.."
 . bench/vkdev.sh
 M=models/qwen3-30b-a3b-gguf/Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf
 T=${CLAUDE_TMP:-/home/akhil/.claude/jobs/34438cab/tmp}
@@ -15,7 +15,7 @@ while IFS= read -r prompt; do
   [ -s "traces/qwen-prompts/$id.bin" ] && { echo "$id exists, skip"; continue; }
   UNIT=achilles-qwen-trace
   systemctl --user reset-failed $UNIT 2>/dev/null
-  systemd-run --user --wait --unit $UNIT -p WorkingDirectory=/var/home/akhil/achilles \
+  systemd-run --user --wait --unit $UNIT -p WorkingDirectory="$PWD" \
     -p MemoryHigh=22G -p MemoryMax=26G -p MemorySwapMax=1G -p Nice=10 -p IOWeight=10 \
     bash -c "GGML_VK_VISIBLE_DEVICES=$VKDEV exec src/achilles-arena -m '$M' \
       -p '$(printf "%s" "$prompt" | sed "s/'/'\\\\''/g")' \

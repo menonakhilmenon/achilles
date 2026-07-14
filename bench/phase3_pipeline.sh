@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Detached Phase-3 pipeline: qwen repack -> validate -> GLM repack.
 set -u
-cd /var/home/akhil/achilles
+cd "$(dirname "$0")/.."
 . bench/vkdev.sh
 T=/home/akhil/.claude/jobs/34438cab/tmp
 S=bench/results/phase3-status.txt
@@ -18,7 +18,7 @@ for mode in plain shadow; do
   python3 bench/evict_file.py "$M" >/dev/null; python3 bench/evict_file.py models/qwen3-shadow.bin >/dev/null 2>&1
   sleep 5
   systemctl --user reset-failed achilles-qwen 2>/dev/null
-  systemd-run --user --wait --unit achilles-qwen -p WorkingDirectory=/var/home/akhil/achilles \
+  systemd-run --user --wait --unit achilles-qwen -p WorkingDirectory="$PWD" \
     -p MemoryHigh=20G -p MemoryMax=24G -p MemorySwapMax=1G -p Nice=10 -p IOWeight=10 \
     bash -c "GGML_VK_VISIBLE_DEVICES=$VKDEV exec src/achilles-arena -m '$M' \
       -p 'The three main causes of the French Revolution were' \

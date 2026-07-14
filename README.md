@@ -1,4 +1,4 @@
-# Achilles
+# llama-cpp-extended-vram
 
 Run a frontier-scale MoE model (**GLM-5.2**, 744B params, 247 GB on disk) on a
 64 GB gaming desktop by treating memory as a small cache over a paged expert

@@ -31,9 +31,9 @@ which checks out `b9976`):
 cd llama.cpp
 git checkout b9976                       # the base these patches target
 # preferred — preserves the two commits with authorship:
-git am /path/to/achilles/patches/llama.cpp-mtp/00*.patch
+git am /path/to/llama-cpp-extended-vram/patches/llama.cpp-mtp/00*.patch
 # or, if you just want the diff applied without commits:
-git apply /path/to/achilles/patches/llama.cpp-mtp/glm-dsa-mtp.combined.diff
+git apply /path/to/llama-cpp-extended-vram/patches/llama.cpp-mtp/glm-dsa-mtp.combined.diff
 
 # then rebuild as usual
 cmake --build build-vk -j"$(nproc)"

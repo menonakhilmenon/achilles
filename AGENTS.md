@@ -1,6 +1,6 @@
 # AGENTS.md — operating this repo
 
-A runbook for AI agents (and humans) to set up and drive the achilles stack on a
+A runbook for AI agents (and humans) to set up and drive the llama-cpp-extended-vram stack on a
 fresh machine. This repo runs a frontier-scale MoE model on a 64 GB desktop by
 using **RAM as a cache tier over SSD-resident experts** (VRAM holds the dense
 skeleton). The core result is settled — see `docs/traces-analysis.md` §33 and the

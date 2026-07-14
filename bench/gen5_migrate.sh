@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Migrate models to the Gen5 drive, regenerate shadow, re-run headline.
 set -u
-cd /var/home/akhil/achilles
+cd "$(dirname "$0")/.."
 D=/run/media/akhil/Hyperspace
 S=bench/results/gen5-status.txt
 : > "$S"

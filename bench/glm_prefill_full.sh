@@ -2,7 +2,7 @@
 # GLM-5.2 long-prompt prefill A/B at FULL profile (owner-authorized):
 # MemoryHigh=44G, budget 30GiB, 10 threads, 6 workers. pstream 1 then 0.
 set -u
-cd /var/home/akhil/achilles
+cd "$(dirname "$0")/.."
 . bench/vkdev.sh
 M=models/glm52-gguf/UD-Q2_K_XL/GLM-5.2-UD-Q2_K_XL-00001-of-00007.gguf
 T=${CLAUDE_TMP:-/home/akhil/.claude/jobs/34438cab/tmp}
@@ -19,7 +19,7 @@ for ps in 1 0; do
   fi
   LOG=$T/glm-full-ps$ps.log
   systemctl --user reset-failed $UNIT 2>/dev/null
-  systemd-run --user --unit $UNIT -p WorkingDirectory=/var/home/akhil/achilles \
+  systemd-run --user --unit $UNIT -p WorkingDirectory="$PWD" \
     -p MemoryHigh=44G -p MemoryMax=48G -p MemorySwapMax=2G \
     bash -c "GGML_VK_VISIBLE_DEVICES=$VKDEV exec src/achilles-arena -m '$M' -f '$T/longprompt.txt' \
       -n 8 -t 10 -ngl 99 -ot exps=CPU --budget-gib 30 --workers 6 --pstream $ps --stats > $LOG 2>&1"

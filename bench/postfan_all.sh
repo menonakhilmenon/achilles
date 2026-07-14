@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-cd /var/home/akhil/achilles
+cd "$(dirname "$0")/.."
 R=bench/results/postfan.txt
 : > "$R"
 CG=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)

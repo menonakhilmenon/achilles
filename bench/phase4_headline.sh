@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Phase 4: GLM shadow validation + combined headline re-measure.
 set -u
-cd /var/home/akhil/achilles
+cd "$(dirname "$0")/.."
 . bench/vkdev.sh
 M=models/glm52-gguf/UD-Q2_K_XL/GLM-5.2-UD-Q2_K_XL-00001-of-00007.gguf
 T=/home/akhil/.claude/jobs/34438cab/tmp
@@ -18,7 +18,7 @@ run_glm() {  # name promptfile [flags...] — flags must be space-free tokens
   AVAIL=$(awk '/MemAvailable/ {print int($2/1048576)}' /proc/meminfo)
   [ "$AVAIL" -lt 48 ] && { log "ABORT $name: ${AVAIL}G"; exit 1; }
   systemctl --user reset-failed achilles-glm-h 2>/dev/null
-  systemd-run --user --wait --unit achilles-glm-h -p WorkingDirectory=/var/home/akhil/achilles \
+  systemd-run --user --wait --unit achilles-glm-h -p WorkingDirectory="$PWD" \
     -p MemoryHigh=44G -p MemoryMax=48G -p MemorySwapMax=2G \
     bash -c "GGML_VK_VISIBLE_DEVICES=$VKDEV exec src/achilles-arena -m '$M' -f '$pf' \
       -t 10 -ngl 99 -ot exps=CPU --budget-gib 30 --workers 6 --policy reuse $* --stats > $T/glm-h-$name.log 2>&1" 2>/dev/null
