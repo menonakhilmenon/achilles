@@ -1,0 +1,267 @@
+From 961af24433e9a7ccc99604d7c2d091d28f1550cf Mon Sep 17 00:00:00 2001
+From: akhil <28900644+menonakhilmenon@users.noreply.github.com>
+Date: Mon, 13 Jul 2026 12:46:54 +0200
+Subject: [PATCH 1/2] glm-dsa: load NextN tensors and add DeepSeek-style MTP
+ draft graph
+
+Private-fork patch for the achilles arena. Loader stops skipping blk.N
+nextn tensors when nextn_predict_layers > 0 (mmap: no extra resident
+cost). deepseek2 trunk exports pre-final-norm hidden as t_h_nextn with
+masked/unmasked row semantics. New glm_dsa::graph_mtp: enorm/hnorm ->
+eh_proj -> one MLA+MoE block -> shared head, wired to
+LLM_GRAPH_TYPE_DECODER_MTP.
+---
+ src/models/deepseek2.cpp |  14 ++-
+ src/models/glm-dsa.cpp   | 179 ++++++++++++++++++++++++++++++++++++++-
+ src/models/models.h      |   6 ++
+ 3 files changed, 197 insertions(+), 2 deletions(-)
+
+diff --git a/src/models/deepseek2.cpp b/src/models/deepseek2.cpp
+index a9e8bc5..cf1314f 100644
+--- a/src/models/deepseek2.cpp
++++ b/src/models/deepseek2.cpp
+@@ -365,7 +365,10 @@ llama_model_deepseek2::graph::graph(const llama_model & model, const llm_graph_p
+                             Qcur, Kcur, Vcur, nullptr, nullptr, nullptr, kq_scale, il);
+             }
+         }
+-        if (il == n_layer - 1 && inp_out_ids) {
++        // when extracting UNMASKED nextn embeddings (MTP target ctx), every
++        // row's trunk hidden is needed -> defer output-row slicing to the tail
++        if (il == n_layer - 1 && inp_out_ids &&
++            (!cparams.embeddings_nextn || cparams.embeddings_nextn_masked)) {
+             cur   = ggml_get_rows(ctx0, cur, inp_out_ids);
+             inpSA = ggml_get_rows(ctx0, inpSA, inp_out_ids);
+         }
+@@ -423,6 +426,15 @@ llama_model_deepseek2::graph::graph(const llama_model & model, const llm_graph_p
+     }
+     cur = inpL;
+ 
++    if (cparams.embeddings_nextn) {
++        // pre-final-norm trunk hidden feeds the DeepSeek-style MTP head
++        cb(cur, "h_nextn", -1);
++        res->t_h_nextn = cur;
++        if (!cparams.embeddings_nextn_masked && inp_out_ids) {
++            cur = ggml_get_rows(ctx0, cur, inp_out_ids);
++        }
++    }
++
+     cur = build_norm(cur, model.output_norm, NULL, LLM_NORM_RMS, -1);
+ 
+     cb(cur, "result_norm", -1);
+diff --git a/src/models/glm-dsa.cpp b/src/models/glm-dsa.cpp
+index 32fe6de..6601dfc 100644
+--- a/src/models/glm-dsa.cpp
++++ b/src/models/glm-dsa.cpp
+@@ -75,7 +75,7 @@ void llama_model_glm_dsa::load_arch_tensors(llama_model_loader &) {
+ 
+     for (int i = 0; i < n_layer_all; ++i) {
+         int flags = 0;
+-        if (i >= n_layer) {
++        if (i >= n_layer && hparams.n_layer_nextn == 0) {
+             // skip all tensors in the NextN layers
+             // TODO @ngxson : TENSOR_NOT_REQUIRED was a hack, need to remove it later
+             flags |= TENSOR_SKIP | TENSOR_NOT_REQUIRED;
+@@ -147,6 +147,183 @@ void llama_model_glm_dsa::load_arch_tensors(llama_model_loader &) {
+ }
+ 
+ std::unique_ptr<llm_graph_context> llama_model_glm_dsa::build_arch_graph(const llm_graph_params & params) const {
++    if (params.gtype == LLM_GRAPH_TYPE_DECODER_MTP) {
++        return std::make_unique<graph_mtp>(*this, params);
++    }
+     return std::make_unique<graph>(*this, params);
+ }
+ 
++// DeepSeek-style single-head MTP: tok_embd/enorm + h/hnorm -> eh_proj ->
++// one full glm-dsa block (MLA attention + MoE FFN) -> shared head.
++// Attention/FFN body mirrors llama_model_deepseek2::graph at il = n_layer.
++llama_model_glm_dsa::graph_mtp::graph_mtp(const llama_model & model, const llm_graph_params & params)
++    : llm_graph_context(params) {
++    GGML_ASSERT(hparams.n_layer_nextn == 1 && "GLM_DSA MTP supports a single nextn block");
++    GGML_ASSERT(hparams.is_mla());
++
++    const int il = hparams.n_layer();
++    const auto & layer = model.layers[il];
++    GGML_ASSERT(layer.nextn.eh_proj && layer.nextn.enorm && layer.nextn.hnorm &&
++                "GLM_DSA MTP block tensors missing (requantize/convert with nextn support)");
++
++    const int64_t n_embd_head_k = hparams.n_embd_head_k_mla();
++    const int64_t n_embd_head_qk_rope = hparams.n_rot();
++    const int64_t n_embd_head_qk_nope = n_embd_head_k - n_embd_head_qk_rope;
++    const uint32_t kv_lora_rank = hparams.n_lora_kv;
++
++    // YaRN-corrected kq scale (same derivation as the trunk graph)
++    GGML_ASSERT(ext_factor >= 0.0f);
++    const float attn_factor_org = attn_factor * (1.0f + 0.1f * logf(1.0f / freq_scale));
++    const float mscale   = attn_factor_org * (1.0f + 0.1f * hparams.rope_yarn_log_mul * logf(1.0f / freq_scale));
++    const float kq_scale = 1.0f * mscale * mscale / sqrtf(float(n_embd_head_k));
++
++    // inputs: draft tokens (or precomputed embeddings) + trunk hidden per row
++    auto inp = std::make_unique<llm_graph_input_embd_h>(hparams.n_embd);
++
++    inp->tokens = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_tokens);
++    ggml_set_input(inp->tokens);
++
++    inp->embd = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, hparams.n_embd_inp(), n_tokens);
++    ggml_set_input(inp->embd);
++
++    ggml_tensor * tok_embd;
++    if (ubatch.token) {
++        ggml_tensor * tok_embd_w = layer.nextn.embed_tokens ? layer.nextn.embed_tokens : model.tok_embd;
++        tok_embd = ggml_get_rows(ctx0, tok_embd_w, inp->tokens);
++    } else {
++        tok_embd = inp->embd;
++    }
++    cb(tok_embd, "mtp_tok_embd", il);
++
++    inp->h = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, hparams.n_embd, n_tokens);
++    ggml_set_input(inp->h);
++    ggml_set_name(inp->h, "mtp_h_input");
++
++    ggml_tensor * h_embd = inp->h;
++    res->add_input(std::move(inp));
++
++    ggml_tensor * inp_pos     = build_inp_pos();
++    ggml_tensor * inp_out_ids = build_inp_out_ids();
++
++    auto * inp_attn = build_attn_inp_k();
++
++    ggml_tensor * e_norm = build_norm(tok_embd, layer.nextn.enorm, nullptr, LLM_NORM_RMS, il);
++    cb(e_norm, "mtp_enorm", il);
++
++    ggml_tensor * h_norm = build_norm(h_embd, layer.nextn.hnorm, nullptr, LLM_NORM_RMS, il);
++    cb(h_norm, "mtp_hnorm", il);
++
++    ggml_tensor * concat = ggml_concat(ctx0, e_norm, h_norm, /*dim=*/ 0);
++    cb(concat, "mtp_concat", il);
++
++    ggml_tensor * cur = build_lora_mm(layer.nextn.eh_proj, concat, layer.nextn.eh_proj_s);
++    cb(cur, "mtp_eh_proj", il);
++
++    ggml_tensor * inpSA = cur;
++
++    // --- MLA attention (deepseek2 absorbed path) ---
++    cur = build_norm(cur, layer.attn_norm, nullptr, LLM_NORM_RMS, il);
++    cb(cur, "mtp_attn_norm", il);
++
++    ggml_tensor * q = ggml_mul_mat(ctx0, layer.wq_a, cur);
++    q = build_norm(q, layer.attn_q_a_norm, nullptr, LLM_NORM_RMS, il);
++    q = ggml_mul_mat(ctx0, layer.wq_b, q);
++    cb(q, "mtp_q", il);
++
++    ggml_tensor * q_nope =
++        ggml_view_3d(ctx0, q, n_embd_head_qk_nope, n_head, n_tokens, ggml_row_size(q->type, n_embd_head_k),
++                     ggml_row_size(q->type, n_embd_head_k) * n_head, 0);
++    ggml_tensor * q_pe = ggml_view_3d(
++        ctx0, q, n_embd_head_qk_rope, n_head, n_tokens, ggml_row_size(q->type, n_embd_head_k),
++        ggml_row_size(q->type, n_embd_head_k) * n_head, ggml_row_size(q->type, n_embd_head_qk_nope));
++
++    ggml_tensor * kv_cmpr_pe = ggml_mul_mat(ctx0, layer.wkv_a_mqa, cur);
++    ggml_tensor * kv_cmpr =
++        ggml_view_2d(ctx0, kv_cmpr_pe, kv_lora_rank, n_tokens,
++                     ggml_row_size(kv_cmpr_pe->type, kv_lora_rank + n_embd_head_qk_rope), 0);
++    ggml_tensor * k_pe = ggml_view_3d(ctx0, kv_cmpr_pe, n_embd_head_qk_rope, 1, n_tokens,
++                                      ggml_row_size(kv_cmpr_pe->type, kv_lora_rank + n_embd_head_qk_rope),
++                                      ggml_row_size(kv_cmpr_pe->type, kv_lora_rank + n_embd_head_qk_rope),
++                                      ggml_row_size(kv_cmpr_pe->type, kv_lora_rank));
++
++    q_pe = ggml_rope_ext(ctx0, q_pe, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
++                         ext_factor, attn_factor, beta_fast, beta_slow);
++    k_pe = ggml_rope_ext(ctx0, k_pe, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
++                         ext_factor, attn_factor, beta_fast, beta_slow);
++
++    kv_cmpr = build_norm(kv_cmpr, layer.attn_kv_a_norm, nullptr, LLM_NORM_RMS, il);
++
++    q_nope = ggml_permute(ctx0, q_nope, 0, 2, 1, 3);
++    ggml_tensor * q_nope_absorbed = ggml_mul_mat(ctx0, layer.wk_b, q_nope);
++    q_nope_absorbed = ggml_permute(ctx0, q_nope_absorbed, 0, 2, 1, 3);
++
++    ggml_tensor * Qcur = ggml_concat(ctx0, q_nope_absorbed, q_pe, 0);
++    kv_cmpr = ggml_reshape_3d(ctx0, kv_cmpr, kv_lora_rank, 1, n_tokens);
++    ggml_tensor * Kcur = ggml_concat(ctx0, kv_cmpr, k_pe, 0);
++    ggml_tensor * Vcur = kv_cmpr;
++    cb(Qcur, "mtp_Qcur", il);
++    cb(Kcur, "mtp_Kcur", il);
++
++    cur = build_attn(inp_attn,
++            layer.wo, NULL, layer.wo_s,
++            Qcur, Kcur, Vcur, nullptr, nullptr, layer.wv_b, kq_scale, il);
++    cb(cur, "mtp_attn_out", il);
++
++    if (inp_out_ids && cparams.embeddings_nextn_masked) {
++        cur   = ggml_get_rows(ctx0, cur, inp_out_ids);
++        inpSA = ggml_get_rows(ctx0, inpSA, inp_out_ids);
++    }
++
++    ggml_tensor * ffn_inp = ggml_add(ctx0, cur, inpSA);
++    cb(ffn_inp, "mtp_ffn_inp", il);
++
++    cur = build_norm(ffn_inp, layer.ffn_norm, NULL, LLM_NORM_RMS, il);
++    cb(cur, "ffn_norm", il);  // arena gate-ahead hook expects this name
++
++    ggml_tensor * moe_out = build_moe_ffn(cur,
++        layer.ffn_gate_inp,
++        layer.ffn_up_exps,
++        layer.ffn_gate_exps,
++        layer.ffn_down_exps,
++        layer.ffn_exp_probs_b,
++        n_expert, n_expert_used,
++        LLM_FFN_SILU, hparams.expert_weights_norm,
++        hparams.expert_weights_scale,
++        (llama_expert_gating_func_type) hparams.expert_gating_func,
++        il,
++        nullptr,
++        layer.ffn_gate_up_exps);
++    cb(moe_out, "mtp_ffn_moe_out", il);
++
++    ggml_tensor * ffn_shexp = build_ffn(cur,
++        layer.ffn_up_shexp, NULL, NULL,
++        layer.ffn_gate_shexp, NULL, NULL,
++        layer.ffn_down_shexp, NULL, NULL,
++        NULL, LLM_FFN_SILU, LLM_FFN_PAR, il);
++    cur = ggml_add(ctx0, moe_out, ffn_shexp);
++    cur = ggml_add(ctx0, cur, ffn_inp);
++    cb(cur, "mtp_post_ffn", il);
++
++    ggml_tensor * head_norm_w = layer.nextn.shared_head_norm
++            ? layer.nextn.shared_head_norm
++            : model.output_norm;
++    GGML_ASSERT(head_norm_w && "GLM_DSA MTP: missing both nextn.shared_head_norm and output_norm");
++    cur = build_norm(cur, head_norm_w, nullptr, LLM_NORM_RMS, -1);
++
++    cb(cur, "h_nextn", -1);
++    res->t_h_nextn = cur;
++
++    if (inp_out_ids && !cparams.embeddings_nextn_masked) {
++        cur = ggml_get_rows(ctx0, cur, inp_out_ids);
++    }
++    cb(cur, "mtp_shared_head_norm", -1);
++
++    ggml_tensor * head_w = layer.nextn.shared_head_head ? layer.nextn.shared_head_head : model.output;
++    GGML_ASSERT(head_w && "GLM_DSA MTP: missing LM head");
++    cur = build_lora_mm(head_w, cur, layer.nextn.shared_head_head ? layer.nextn.shared_head_head_s : model.output_s);
++    cb(cur, "result_output", -1);
++
++    res->t_logits = cur;
++    ggml_build_forward_expand(gf, cur);
++}
++
+diff --git a/src/models/models.h b/src/models/models.h
+index 7a52e7b..10bce6b 100644
+--- a/src/models/models.h
++++ b/src/models/models.h
+@@ -1218,6 +1218,12 @@ struct llama_model_glm_dsa : public llama_model_base {
+ 
+     using graph = llama_model_deepseek2::graph;
+ 
++    // DeepSeek-style NextN/MTP draft head (blk.n_layer): eh_proj over
++    // [enorm(tok_embd); hnorm(h_trunk)] -> one full MLA+MoE block -> shared head
++    struct graph_mtp : public llm_graph_context {
++        graph_mtp(const llama_model & model, const llm_graph_params & params);
++    };
++
+     std::unique_ptr<llm_graph_context> build_arch_graph(const llm_graph_params & params) const override;
+ };
+ 
+-- 
+2.54.0
+

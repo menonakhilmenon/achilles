@@ -14,6 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 TAG=${LLAMA_TAG:-b9976}
+PATCHDIR="$(pwd)/patches/llama.cpp-mtp"   # resolve before we cd into llama.cpp
 
 if [ ! -d llama.cpp/.git ]; then
   echo ">> cloning llama.cpp"
@@ -23,6 +24,16 @@ cd llama.cpp
 echo ">> checking out $TAG"
 git fetch --tags --force origin 2>/dev/null || true
 git checkout "$TAG"
+
+# Optional: apply the MTP self-drafting patches (only needed for --spec-mtp).
+# See patches/llama.cpp-mtp/README.md. Off by default; everything else is stock.
+if [ "${LLAMA_MTP:-0}" = "1" ]; then
+  echo ">> applying MTP patches (LLAMA_MTP=1)"
+  git am "$PATCHDIR"/00*.patch || {
+    echo "!! git am failed; aborting the am and leaving llama.cpp at $TAG"
+    git am --abort 2>/dev/null || true
+    echo "!! apply manually per patches/llama.cpp-mtp/README.md"; exit 1; }
+fi
 
 echo ">> configuring (Vulkan, shared libs)"
 cmake -B build-vk \

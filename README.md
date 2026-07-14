@@ -81,8 +81,10 @@ scripts/setup_llama.sh     # clones + builds llama.cpp (Vulkan) at the pinned ta
 > `--pstream 1` hang) that will otherwise bite.
 
 `setup_llama.sh` fetches stock llama.cpp — the arena only uses its public API, so
-no fork is needed for decode/prefill/prefetch. (The optional `--spec-mtp`
-self-drafting path needs two extra commits that live in a private fork.)
+no fork is needed for decode/prefill/prefetch. The optional `--spec-mtp`
+self-drafting path needs two small extra commits, provided as patches in
+`patches/llama.cpp-mtp/` — apply them yourself (`LLAMA_MTP=1 scripts/setup_llama.sh`,
+or see that folder's README). Experimental; a mixed result (§24).
 
 ### 2. Get a model
 

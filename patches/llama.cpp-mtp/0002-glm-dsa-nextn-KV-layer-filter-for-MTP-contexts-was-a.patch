@@ -1,0 +1,29 @@
+From 8143319aabe9ce8197d2fd9b1540f682ddaf5392 Mon Sep 17 00:00:00 2001
+From: akhil <28900644+menonakhilmenon@users.noreply.github.com>
+Date: Mon, 13 Jul 2026 13:37:07 +0200
+Subject: [PATCH 2/2] glm-dsa: nextn KV layer filter for MTP contexts (was
+ allocating full-model KV)
+
+Same filter STEP35 already has. Without it the MTP draft context's
+llama_kv_cache covered every layer - a ~34GB memset that OOM'd or froze
+the host three times before being cornered in a caged harness.
+---
+ src/llama-model.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/llama-model.cpp b/src/llama-model.cpp
+index d874813..376baa8 100644
+--- a/src/llama-model.cpp
++++ b/src/llama-model.cpp
+@@ -2169,7 +2169,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
+                         filter = [&](uint32_t il) { return il >= hparams.n_layer(); };
+                     }
+ 
+-                    if (arch == LLM_ARCH_STEP35 && hparams.n_layer_nextn > 0) {
++                    if ((arch == LLM_ARCH_STEP35 || arch == LLM_ARCH_GLM_DSA) && hparams.n_layer_nextn > 0) {
+                         if (params.ctx_type == LLAMA_CONTEXT_TYPE_MTP) {
+                             filter = [&](uint32_t il) { return il >= hparams.n_layer(); };
+                         } else {
+-- 
+2.54.0
+
