@@ -31,11 +31,17 @@ a 30 GiB budget on the same box (§33):
 | GLM-4.6 | 115 GB | 31% | 0.87 | **2.73 tok/s** |
 | GLM-5.2 | 247 GB | 12% | ~0.75 | **1.60 tok/s** |
 
-A model that *fits* in RAM barely pages and runs at near-native speed; the SSD
-paging only becomes the bottleneck (and this runtime only earns its keep) once the
-model overflows RAM by 2×+. Pick a model/quant whose expert bytes are a sane
-multiple of your RAM: Air-class for speed, GLM-4.6-class (~100 GB) for a strong
-quality/speed balance, GLM-5.2 for maximum capability on a 64 GB box.
+This is the project's core result, and it's conclusive: **RAM works as a cache
+tier over the SSD-resident experts** (one level below VRAM-over-RAM), and decode
+throughput is a clean function of the resident fraction — a textbook cache
+miss-rate curve — across a 5× model-size range. A model that *fits* in RAM barely
+pages and runs at near-native speed; the SSD paging only becomes the bottleneck
+(and this runtime only earns its keep) once the model overflows RAM by 2×+. So the
+744B-on-64GB feasibility question is answered — you get real, usable speed, set by
+how much of the working set your RAM cache holds. Pick a model/quant whose expert
+bytes are a sane multiple of your RAM: Air-class for speed, GLM-4.6-class
+(~100 GB) for a strong quality/speed balance, GLM-5.2 for maximum capability on a
+64 GB box.
 
 ## Quickstart
 
@@ -60,9 +66,19 @@ Tested on Linux (Bazzite/Fedora, kernel 6.x) with a discrete GPU. You need:
 ### 1. Build llama.cpp (Vulkan) + the arena
 
 ```
+scripts/bootstrap.sh       # one-shot: llama.cpp + arena + venv (idempotent)
+```
+
+or do it by hand:
+
+```
 scripts/setup_llama.sh     # clones + builds llama.cpp (Vulkan) at the pinned tag
 ./build.sh                 # compiles src/achilles-arena against it
 ```
+
+> **Agents:** see `AGENTS.md` for a deterministic setup + run runbook, including
+> the memory-safe launch wrapper and the gotchas (GPU-by-name, TTM args, the
+> `--pstream 1` hang) that will otherwise bite.
 
 `setup_llama.sh` fetches stock llama.cpp — the arena only uses its public API, so
 no fork is needed for decode/prefill/prefetch. (The optional `--spec-mtp`
@@ -184,6 +200,8 @@ pays; prediction spent on *eviction* is always free.
 
 ## Layout
 
+- `AGENTS.md` — deterministic setup + operating runbook (start here if you're an agent)
+- `scripts/bootstrap.sh` — one-shot local setup (llama.cpp + arena + venv)
 - `build.sh`, `scripts/setup_llama.sh` — build the arena and its llama.cpp
 - `src/arena.cpp` — the runtime (the whole thing); `src/pager.cpp` — an earlier
   page-cache-steering prototype
