@@ -17,8 +17,25 @@ in-place with anonymous memory it pages from disk on demand.
 | prefill (~2700-token prompt) | ~0.5 tok/s | **25.1 tok/s** — ~50× (layer-streaming + shadow + io_uring + full-batch ubatches) |
 
 Every number cold, controlled, token-identity-gated (output is bit-identical to
-unpaged inference). GLM-4.5-Air (110B) runs at 3.4 tok/s memory-constrained /
-15.3 unconstrained. Full experimental record in `docs/traces-analysis.md`.
+unpaged inference). Full experimental record in `docs/traces-analysis.md`.
+
+### Speed is governed by how much of the model fits in RAM
+
+The one variable that dominates decode is the **resident fraction** — what share
+of the expert set fits in your RAM budget. Same runtime, three `glm4moe` models at
+a 30 GiB budget on the same box (§33):
+
+| model | size | experts resident @30 GiB | decode hit | **decode** |
+|---|---|---|---|---|
+| GLM-4.5-Air | 47 GB | ~100% (fits) | 0.96–1.0 | **15.3 tok/s** (3.4 @ 24 GiB) |
+| GLM-4.6 | 115 GB | 31% | 0.87 | **2.73 tok/s** |
+| GLM-5.2 | 247 GB | 12% | ~0.75 | **1.60 tok/s** |
+
+A model that *fits* in RAM barely pages and runs at near-native speed; the SSD
+paging only becomes the bottleneck (and this runtime only earns its keep) once the
+model overflows RAM by 2×+. Pick a model/quant whose expert bytes are a sane
+multiple of your RAM: Air-class for speed, GLM-4.6-class (~100 GB) for a strong
+quality/speed balance, GLM-5.2 for maximum capability on a 64 GB box.
 
 ## Quickstart
 
@@ -57,10 +74,23 @@ Start with **GLM-4.5-Air** (47 GB) — small enough to be practical:
 
 ```
 python3 -m venv .venv && .venv/bin/pip install huggingface_hub hf_transfer
-scripts/download_air.sh          # -> models/glm45-air-gguf/
+scripts/download_air.sh          # -> models/glm45-air-gguf/   (47 GB)
 ```
 
-The 247 GB headline target is `unsloth/GLM-5.2-GGUF` (UD-Q2_K_XL), same layout.
+Then scale up as your disk/patience allows — all `glm4moe`, all the same run
+command, no code changes:
+
+| script | model | size | why |
+|---|---|---|---|
+| `scripts/download_air.sh` | GLM-4.5-Air | 47 GB | fits RAM, fast (15 tok/s), best for a first run |
+| `scripts/download_glm46.sh` | GLM-4.6 UD-IQ2_XXS | 115 GB | mid-size, ~31% resident, exercises the paging path (2.7 tok/s) |
+| — (`unsloth/GLM-5.2-GGUF`, UD-Q2_K_XL) | GLM-5.2 | 247 GB | the headline 744B target (1.6 tok/s) |
+
+**Big models need a big, fast disk.** Put the GGUF (and its optional `--shadow`
+file) on your fastest NVMe. If that's a different mount than `models/`, download
+there and symlink, e.g. `ln -s /mnt/fastnvme/glm46-gguf models/glm46-gguf` (the
+`download_*.sh` scripts honor `DEST=/path`). Decode reads experts from this drive
+on every miss, so its latency sets your floor.
 
 ### 3. Run
 
@@ -113,7 +143,20 @@ passes them through. On top of those:
 | `--no-pager` | off | disable the arena (baseline kernel-mmap behavior, for comparison) |
 
 Optional: `scripts/repack_shadow.py <model.gguf> models/<name>-shadow` builds the
-expert-major `--shadow` file (token-identical, faster reads).
+expert-major `--shadow` file (token-identical, faster reads). Note the shadow
+speeds up **prefill** (large sequential streams) but not decode on a fast drive —
+decode is latency-bound, not bandwidth-bound (§31, §33), so sequential packing
+buys nothing there.
+
+### Known issues
+
+- **`--pstream 1` can hang (io_uring lost completion).** Under heavy back-to-back
+  runs, a dropped io_uring completion can leave a request's counter stuck, and the
+  stall-loop spins forever (one core hot, drive idle, no output). It correlates
+  with the extra `--pstream 1` I/O pressure. Workaround: cap each run with systemd
+  `RuntimeMaxSec` (see `bench/*.sh`) so a hung run self-kills, and prefer
+  `--pstream 0` if you hit it. A completion watchdog is a TODO. If a run hangs,
+  `systemctl --user stop <unit>` (or kill the process) clears it.
 
 ## How it works
 
@@ -146,6 +189,6 @@ pays; prediction spent on *eviction* is always free.
   page-cache-steering prototype
 - `docs/research.md` — feasibility math, prior-art survey
 - `docs/plan.md` — phased plan with measured gates
-- `docs/traces-analysis.md` — the full experimental record (§1–32)
+- `docs/traces-analysis.md` — the full experimental record (§1–33)
 - `scripts/` — model download, tracing, probe training, analysis
 - `bench/` — benchmark scripts and their recorded results (`bench/results/`)

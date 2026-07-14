@@ -852,6 +852,62 @@ experts mostly from deep ranks), and no cheap same-layer predictor beats it. The
 decode recall ceiling from §31 stands. Kept the ranking-dump instrumentation
 (`--dump`, zero cost when off) for future routing studies; removed the feature.
 
+### 33. Mid-size scaling: GLM-4.6 (115 GB) at 2.73 tok/s, and the resident-fraction law
+
+Ran the arena on a third model to fill the gap between Air (47 GB) and GLM-5.2
+(247 GB): **GLM-4.6 UD-IQ2_XXS**, 115 GB, `glm4moe`, 90 MoE layers × 160 experts
+(98.2 GiB of experts), plain global top-8. Same runtime, zero code changes — the
+`-ot exps=CPU` interception and the scorer work as-is on any `glm4moe` GGUF.
+
+**Decode (30 GiB budget, Gen5, shadow):** 2.732 / 2.744 / 2.733 tok/s across three
+runs — dead stable. Token-identity gate passed (shadow output bit-identical to
+plain). Decode-only hit 0.868; per-stream BW 4.5 GB/s (latency-bound, not
+bandwidth-bound — same regime as §31). **Prefill (pstream 0):** 22.85 tok/s.
+
+**Shadow gave no decode gain** (2.73 shadow vs 2.77 plain): at 4.5 GB/s we are
+nowhere near the drive's bandwidth ceiling, so making reads sequential buys
+nothing — the cost is per-request latency, exactly as §31 predicted. Shadow still
+matters for prefill (large sequential streams), not decode.
+
+**The resident-fraction law.** Lining up all three `glm4moe` models at the same
+30 GiB budget makes the single dominant variable obvious — it is *not* cleverness
+in the pager, it is **what fraction of the expert set fits in RAM**:
+
+| model | MoE layers | expert bytes | resident @30 GiB | decode hit | **decode tok/s** |
+|---|---|---|---|---|---|
+| GLM-4.5-Air (47 GB) | 46 | 44 GiB | ~100% (fits) | 0.96–1.0 | **15.3** (3.4 @ 24 GiB) |
+| GLM-4.6 (115 GB) | 90 | 98 GiB | 31% | 0.868 | **2.73** |
+| GLM-5.2 (247 GB) | ~90 | ~200 GiB | 12% | ~0.75 | **1.60** |
+
+Air is fast because it *doesn't page* — its entire expert set is smaller than the
+RAM budget, so hit ≈ 100% and decode runs at RAM/compute speed (15.3 ≈ native
+llama.cpp; the arena adds ~nothing there). The instant a model overflows RAM by
+2×+, decode flips from compute-bound to IO-bound and lands in the 1.6–2.7 band.
+GLM-4.6 sits exactly where predicted: 2.2× the budget → 31% resident → 13% miss →
+2.73. A secondary, compounding effect: Air also has *half the MoE layers* (46 vs
+90) and smaller experts, so it touches ~half the expert bytes per token even when
+it does page. Takeaway: **the paging runtime only earns its keep once the model
+vastly exceeds RAM; below that, "it fits" wins and there is nothing to hide.**
+
+**Architecture ideal for this runtime (analysis, not yet run):** the arena's
+governing cost is "a decode round stalls if *any* of the token's active routed
+experts miss," so P(clean layer) = recall^(active experts). Every model above is
+top-8 → recall⁸. **Llama-4 Maverick is top-1** (400B, 128 experts, 1 routed + 1
+shared per token) → recall¹, an ~8× smaller per-token miss surface *and* ~8× less
+per-token expert I/O — while still large enough (400B) to require paging (Scout,
+109B, fits Q2 under the budget and never exercises the SSD path). Same `*_exps`
+tensor naming → arena-ready. This is the structural sweet spot the runtime was
+implicitly built for; queued as the next measurement.
+
+**Op note — the io_uring lost-completion hang is `pstream 1`-correlated.** During
+the GLM-4.6 headline, `--pstream 1` (prefill layer-streaming) hung twice (one core
+spinning, drive idle, `pending[b]` never draining — §31 footnote), while every
+`pstream 0` decode/prefill run completed clean. The extra layer-streaming I/O
+pressure is what trips the dropped-CQE. Mitigation now in the bench scripts: a
+systemd `RuntimeMaxSec=200` cap self-kills a hung run instead of spinning
+indefinitely (cost us 40 min before it was caught). Real fix (a completion
+watchdog / re-arm) remains a TODO.
+
 ## Implications for the runtime design
 
 1. Cache = decayed-LFU over experts, sized as large as RAM allows; static popularity
